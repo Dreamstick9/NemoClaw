@@ -12,8 +12,9 @@ before those targets run; local runners must provide it themselves.
   It selects targets and jobs that own changed files, then publishes the `Relevant E2E` check.
   It also supports trusted manual dispatches for the latest PR commit.
   Full manual runs dispatched against `main` publish the `Release qualification` check for the candidate commit SHA.
-  Push runs skip the Jetson nvmap and DGX Spark llama.cpp jobs because their
-  required workflow dispatch flags cannot be set by a push event.
+  Each trusted push to `main` selects the CPU-only `jetson-nvmap-gpu` proof.
+  Push runs skip the DGX Spark llama.cpp jobs because their required workflow
+  dispatch flag cannot be set by a push event.
 - `.github/workflows/hosted-runner-recovery.yaml` evaluates first-attempt
   failures from approved `main` workflows and requests one full rerun only when
   every non-passing job has authenticated GitHub-hosted runner-loss evidence.
@@ -236,11 +237,28 @@ Failed targets still write a manifest for diagnosis, and the existing artifact u
 The manifest is secret-free diagnostic evidence.
 It does not replace the workflow job result or the `Release qualification` release gate.
 
-Run the planner locally to inspect the complete default selection:
+Run the planner locally to render the complete default selection as a Markdown table:
 
 ```bash
-npx tsx tools/e2e/workflow-plan.mts
+npx tsx tools/e2e/workflow-plan.mts --summary
 ```
+
+Add the existing `--jobs` or `--targets` selector to render a filtered plan:
+
+```bash
+npx tsx tools/e2e/workflow-plan.mts --summary --jobs hermes-e2e
+npx tsx tools/e2e/workflow-plan.mts --summary --targets ubuntu-repo-cloud-openclaw
+```
+
+The command renders a Markdown summary to standard output.
+To publish that output in a GitHub Actions job, append it to `$GITHUB_STEP_SUMMARY`:
+
+```bash
+npx tsx tools/e2e/workflow-plan.mts --summary >> "$GITHUB_STEP_SUMMARY"
+```
+
+The workflow's `--ci-output` mode uses the same renderer for its job summary.
+The table includes the typed registry matrix, shared test matrix, three catalogue profile matrices, and retained workflow jobs.
 
 ## Inactive Windows MXC OpenClaw qualification
 
@@ -518,21 +536,23 @@ A local fixture cannot authorize a production release.
 Maintainers do not build a local evidence ledger or infer GitHub job status from an artifact.
 The Launchable job retains its test and cleanup artifacts for diagnosis.
 
-The Jetson nvmap and DGX Spark llama.cpp jobs remain excluded from ordinary and
-full runs unless their independent opt-in flags are `true`.
+Manual ordinary and full runs exclude the Jetson nvmap and DGX Spark llama.cpp
+jobs unless their independent opt-in flags are `true`.
 Set `allow_jetson_dispatch=true` to select `jetson-nvmap-gpu` after the
 operator-owned dispatch service is available at the repository variable
 `JETSON_DISPATCH_URL`. Refer to the
 [Jetson dispatch controller](docs/jetson-dispatch.md) for the trusted workflow,
 HTTP contract, and evidence boundary that NemoClaw owns.
+Each trusted push to `main` selects `jetson-nvmap-gpu` without changing the
+manual input default.
 Set `allow_dgx_spark_runner_queue=true` to select both
 `llama-cpp-dgx-spark-plan` and `llama-cpp-dgx-spark-qualification`.
 GitHub can pause the qualification job for the
 `approve-dgx-spark-image-qualification` environment before it reaches the DGX
 Spark runner.
-Pre-tag evidence requires both hardware opt-in flags to remain `false`.
-Results from opt-in hardware runs do not enter the required pre-tag E2E
-denominator.
+Manual pre-tag dispatches require both hardware opt-in flags to remain `false`.
+Jetson push results and opt-in hardware results do not enter the required
+pre-tag E2E denominator.
 
 ### Hosted-Runner Recovery
 
@@ -816,11 +836,35 @@ E2E does not run automatically for pull requests.
 Pull requests retain deterministic CI, including the `e2e-support` Vitest project.
 Each push to `main` compares `github.event.before` with `github.sha`.
 The planner selects catalogue targets, tagged credential-free tests, registry targets, and retained workflow jobs that own changed files.
+The planner also selects the CPU-only `jetson-nvmap-gpu` proof for every trusted push.
 Changes to the central workflow, planner, or shared execution helpers select the complete default E2E set.
-If no E2E target owns a changed file, `Relevant E2E` reports a successful no-op.
+If no other E2E target owns a changed file, `Relevant E2E` requires only the Jetson proof.
 Otherwise, `Relevant E2E` requires every selected workflow job to pass.
-The central workflow skips the Jetson nvmap and DGX Spark llama.cpp jobs on push.
+The central workflow skips the DGX Spark llama.cpp jobs on push.
 The central workflow has no scheduled trigger.
+
+The workflow planner connects each trusted input to its execution and evidence boundary:
+
+```mermaid
+flowchart LR
+  push["main push diff"] --> planner["Workflow planner"]
+  manual["Exact-SHA full manual dispatch<br/>or manual selectors"] --> planner
+  planner --> registry["Typed registry matrix"]
+  planner --> shared["Shared test matrix"]
+  planner --> profiles["Three catalogue profile matrices"]
+  planner --> retained["Retained workflow jobs"]
+  profiles --> reusable["Reusable profile workflow"]
+  registry --> dedicated["Dedicated GitHub Actions jobs"]
+  shared --> dedicated
+  retained --> dedicated
+  reusable --> evidence["Diagnostic product evidence"]
+  dedicated --> evidence
+  reusable -->|"push job results"| relevant["Relevant E2E"]
+  dedicated -->|"push job results"| relevant
+  reusable -->|"full manual job results"| release["Release qualification"]
+  dedicated -->|"full manual job results"| release
+  release --> gate["Release gate"]
+```
 
 Selected jobs retain their runner, credential, evidence, and cleanup boundaries.
 A main push can queue repository-owned GPU runners or create external resources when a selected target requires them.
