@@ -12,7 +12,7 @@ import {
   type LifecycleProfile,
   readRegistrySandboxEntry,
 } from "../fixtures/phases/index.ts";
-import { listTargets } from "../registry/registry.ts";
+import { listTargets, requireTargets } from "../registry/registry.ts";
 import { liveTargetSupport, liveTargetTestName } from "../registry/runtime-support.ts";
 import { cloudExperimentalChecksForOnboarding } from "./cloud-experimental-check-list.ts";
 import { runE2eCloudExperimentalChecks } from "./cloud-experimental-checks.ts";
@@ -42,6 +42,16 @@ process.env.NEMOCLAW_CLI_BIN ??= CLI_ENTRYPOINT;
 // targeted unsupported target at module load so the job log/summary
 // captures it before vitest reports the skipped test by id.
 const SELECTED_TARGET_ID = process.env.TARGET_ID;
+// That selector matches nothing when the id names no registered target, and an
+// empty id builds the selector `-t "^$"`, which also matches nothing. Vitest
+// then filters every test out and the run exits 0, reporting success for a run
+// that executed no target. `generate-matrix` already rejects an unknown id
+// before the dispatch reaches here, so this is the last-mile check for a run
+// that sets TARGET_ID some other way. Resolve the id through the registry and
+// let it name the registered choices (#8286).
+if (SELECTED_TARGET_ID !== undefined) {
+  requireTargets([SELECTED_TARGET_ID]);
+}
 const REGISTRY_TARGET_PHASES = [
   "resolve the target contract and run plan",
   "confirm the target environment is ready",
