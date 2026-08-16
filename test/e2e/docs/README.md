@@ -80,13 +80,17 @@ The `generate-matrix` job resolves dispatch input through `requireTargets`, so
 an unknown id fails there before any target job starts.
 
 `test/e2e/live/registry-targets.test.ts` resolves `TARGET_ID` through the same
-registry at module load, which covers a run that sets it another way. An id no
+registry at module load, which covers a run that sets it another way. An ID no
 target declares fails collection with `Unknown target '<id>'. Available
-targets: ...`, and an empty or otherwise unsafe id fails with `Selected target
-ID '<id>' is not safe ...`. Either id would otherwise build a selector that
-matches nothing and exit 0 having executed no target. The check applies to every
-`e2e-live` collection, so a stale `TARGET_ID` in the environment also fails
-`npm run test:live-e2e` and `npm run test:e2e-phases:check`.
+targets: ...`, and an empty ID fails with `Selected target ID '' is not safe
+...`. Without those checks, either ID would build a selector that matches
+nothing and can exit 0 without executing a target. An unsafe ID also fails with
+`Selected target ID '<id>' is not safe ...`; regex-shaped IDs can otherwise
+broaden the selector and run unintended live targets. This module-load guard
+protects the registry-target catalogue when collection includes
+`registry-targets.test.ts`. Both `npm run test:live-e2e` and
+`npm run test:e2e-phases:check` include that file, but a collection command that
+omits it does not run this guard.
 
 A declared target that is not wired for live fixtures still collects. The
 typed-registry matrix reports it as skipped with its `[not wired]` reason and
