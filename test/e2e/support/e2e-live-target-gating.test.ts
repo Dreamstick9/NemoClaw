@@ -206,6 +206,15 @@ describe("live E2E target gating", () => {
 
       expect(empty.status, empty.stdout).not.toBe(0);
       expect(`${empty.stdout}${empty.stderr}`).toContain("Selected target ID ''");
+
+      const unsafe = listLiveTests({
+        enabled: true,
+        env: { TARGET_ID: "unsafe/id" },
+        files: [file],
+      });
+
+      expect(unsafe.status, unsafe.stdout).not.toBe(0);
+      expect(`${unsafe.stdout}${unsafe.stderr}`).toContain("Selected target ID 'unsafe/id'");
     },
   );
 
