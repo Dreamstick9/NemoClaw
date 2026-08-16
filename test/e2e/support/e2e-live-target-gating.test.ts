@@ -65,17 +65,18 @@ function linesForFile(lines: readonly string[], file: string): string[] {
 }
 
 /**
- * A registered target id. `wired: true` selects one the live fixtures support;
+ * A registered target ID. `wired: true` selects one the live fixtures support;
  * `wired: false` selects a declared placeholder the live matrix skips.
  */
 function declaredTargetId({ wired }: { wired: boolean }): string {
   const match = listTargets().find(
     (registered) => liveTargetSupport(registered).supported === wired,
   );
-  if (!match) {
-    throw new Error(`registry declares no ${wired ? "wired" : "not wired"} target`);
-  }
-  return match.id;
+  return match?.id ?? missingDeclaredTarget(wired);
+}
+
+function missingDeclaredTarget(wired: boolean): never {
+  throw new Error(`registry declares no ${wired ? "wired" : "not wired"} target`);
 }
 
 describe("live E2E target gating", () => {
