@@ -10,6 +10,7 @@ vi.mock("../../adapters/openshell/runtime", () => ({ captureOpenshell }));
 import {
   maybeEmitPolicyDenialHint,
   maybeEmitScopeUpgradeHint,
+  POLICY_HINT_DEVICE_PROBE_TIMEOUT_MS,
   POLICY_HINT_MAX_RUNTIME_TIMEOUT_MS,
   POLICY_HINT_TAIL_LINES,
 } from "./exec-policy-hint";
@@ -145,10 +146,38 @@ describe("scope-upgrade hint runtime adapter integration (#9744)", () => {
       "list",
       "--json",
     ]);
-    expect(captureOpenshell.mock.calls[0]?.[1]?.timeout).toBeLessThanOrEqual(
+    // The probe enters the sandbox and starts the OpenClaw CLI, so it needs a
+    // budget the host-side audit-log read ceiling does not give it. Under that
+    // ceiling the probe timed out before the OpenClaw CLI could print, and a
+    // timed-out probe is silent (#10070).
+    // Asserted against the shared ceiling, not only the new budget, so this
+    // still fails if the probe is put back on `runtimeTimeoutMs()`.
+    expect(captureOpenshell.mock.calls[0]?.[1]?.timeout).toBeGreaterThan(
       POLICY_HINT_MAX_RUNTIME_TIMEOUT_MS,
     );
+    expect(captureOpenshell.mock.calls[0]?.[1]?.timeout).toBeGreaterThanOrEqual(
+      POLICY_HINT_DEVICE_PROBE_TIMEOUT_MS,
+    );
     expect(stderr).toEqual([hint]);
+  });
+
+  it("stays silent when the pending-devices probe exceeds its budget (#10070)", async () => {
+    const timeout = Object.assign(new Error("OpenShell exec timed out"), { code: "ETIMEDOUT" });
+    captureOpenshell.mockReturnValueOnce({ error: timeout, output: "", status: null });
+    const stderr: string[] = [];
+
+    const hint = await maybeEmitScopeUpgradeHint(
+      "nemoclaw",
+      "oc-fresh",
+      1,
+      false,
+      ["openclaw", "cron", "add"],
+      { env: {}, writeStderr: (line: string) => stderr.push(line) },
+      "nemoclaw-8091",
+    );
+
+    expect(hint).toBeNull();
+    expect(stderr).toEqual([]);
   });
 
   it("stays silent when the pending-devices probe exits non-zero", async () => {

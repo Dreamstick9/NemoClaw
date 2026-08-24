@@ -25,6 +25,14 @@ export const POLICY_HINT_TAIL_LINES = 200;
 export const POLICY_HINT_PROBE_ATTEMPTS = 3;
 export const POLICY_HINT_PROBE_RETRY_MS = 120;
 export const POLICY_HINT_MAX_RUNTIME_TIMEOUT_MS = 1_000;
+// The pending-devices probe is not the host-side gateway read the ceiling
+// above was sized for. It enters the sandbox and starts the OpenClaw CLI
+// before any JSON is printed, which does not fit in one second on a slower
+// host, and a probe that times out is indistinguishable from "nothing is
+// pending" — the hint then never appears in the one case it exists for
+// (#10070). It runs only after an OpenClaw command already failed, so the
+// operator is reading an error either way.
+export const POLICY_HINT_DEVICE_PROBE_TIMEOUT_MS = 5_000;
 
 export type PolicyDenialLogProbe = (sandboxName: string, gatewayName?: string) => string;
 export type PolicyDenialAuditEnabler = (sandboxName: string, gatewayName?: string) => void;
@@ -52,6 +60,15 @@ function defaultSleep(ms: number): Promise<void> {
 
 function runtimeTimeoutMs(): number {
   return Math.min(getLogsProbeTimeoutMs(), POLICY_HINT_MAX_RUNTIME_TIMEOUT_MS);
+}
+
+/**
+ * Budget for the in-sandbox pending-devices probe. A host that raised the log
+ * probe budget for a slow environment raises this one too, so the env override
+ * stays a minimum rather than a cap.
+ */
+function deviceProbeTimeoutMs(): number {
+  return Math.max(getLogsProbeTimeoutMs(), POLICY_HINT_DEVICE_PROBE_TIMEOUT_MS);
 }
 
 function defaultEnableAudit(sandboxName: string, gatewayName?: string): void {
@@ -91,7 +108,7 @@ function defaultProbePendingDevices(sandboxName: string, gatewayName?: string): 
   const result = captureOpenshell(argv, {
     ignoreError: true,
     includeStderr: false,
-    timeout: runtimeTimeoutMs(),
+    timeout: deviceProbeTimeoutMs(),
   });
   if (result.error || result.status !== 0) {
     throw result.error ?? new Error(`failed to list pending devices (exit ${result.status})`);
