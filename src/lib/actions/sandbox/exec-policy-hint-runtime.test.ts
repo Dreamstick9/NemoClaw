@@ -112,6 +112,7 @@ describe("policy-denial hint runtime adapter integration (#5978)", () => {
 describe("scope-upgrade hint runtime adapter integration (#9744)", () => {
   afterEach(() => {
     vi.resetAllMocks();
+    vi.unstubAllEnvs();
   });
 
   it("reads pending devices through one bounded read-only OpenShell exec", async () => {
@@ -159,6 +160,28 @@ describe("scope-upgrade hint runtime adapter integration (#9744)", () => {
       POLICY_HINT_DEVICE_PROBE_TIMEOUT_MS,
     );
     expect(stderr).toEqual([hint]);
+  });
+
+  it("keeps the probe budget fixed when the log-read setting is raised (#10070)", async () => {
+    // A log-read setting must not extend how long a failed exec waits for
+    // optional guidance, so the budget is fixed rather than derived from it.
+    vi.stubEnv("NEMOCLAW_LOGS_PROBE_TIMEOUT_MS", "60000");
+    captureOpenshell.mockReturnValueOnce({
+      output: JSON.stringify({ pending: [{ requestId: "req-1" }] }),
+      status: 0,
+    });
+
+    await maybeEmitScopeUpgradeHint(
+      "nemoclaw",
+      "oc-fresh",
+      1,
+      false,
+      ["openclaw", "cron", "add"],
+      { env: {}, writeStderr: () => {} },
+      "nemoclaw-8091",
+    );
+
+    expect(captureOpenshell.mock.calls[0]?.[1]?.timeout).toBe(POLICY_HINT_DEVICE_PROBE_TIMEOUT_MS);
   });
 
   it("stays silent when the pending-devices probe exceeds its budget (#10070)", async () => {
