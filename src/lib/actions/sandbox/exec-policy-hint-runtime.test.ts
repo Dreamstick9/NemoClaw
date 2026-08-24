@@ -162,6 +162,37 @@ describe("scope-upgrade hint runtime adapter integration (#9744)", () => {
     expect(stderr).toEqual([hint]);
   });
 
+  it("emits the review path when the in-sandbox probe outlasts the log-read ceiling (#10070)", async () => {
+    // The probe enters the sandbox and starts the OpenClaw CLI before it can
+    // answer. This adapter answers only when the caller allowed enough time,
+    // so the assertion is what the operator sees rather than the option
+    // NemoClaw passed.
+    const SANDBOX_PROBE_DURATION_MS = 2_000;
+    captureOpenshell.mockImplementation((_argv: unknown, options: { timeout: number }) =>
+      options.timeout >= SANDBOX_PROBE_DURATION_MS
+        ? { output: JSON.stringify({ pending: [{ requestId: "req-1" }] }), status: 0 }
+        : {
+            error: Object.assign(new Error("OpenShell exec timed out"), { code: "ETIMEDOUT" }),
+            output: "",
+            status: null,
+          },
+    );
+    const stderr: string[] = [];
+
+    const hint = await maybeEmitScopeUpgradeHint(
+      "nemoclaw",
+      "oc-fresh",
+      1,
+      false,
+      ["openclaw", "cron", "add"],
+      { env: {}, writeStderr: (line: string) => stderr.push(line) },
+      "nemoclaw-8091",
+    );
+
+    expect(hint).toContain("nemoclaw oc-fresh exec -- openclaw devices list");
+    expect(stderr).toEqual([hint]);
+  });
+
   it("keeps the probe budget fixed when the log-read setting is raised (#10070)", async () => {
     // A log-read setting must not extend how long a failed exec waits for
     // optional guidance, so the budget is fixed rather than derived from it.
