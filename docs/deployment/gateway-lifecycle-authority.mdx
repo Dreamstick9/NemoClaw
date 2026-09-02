@@ -177,6 +177,8 @@ $$nemoclaw status
 $$nemoclaw status --json
 ```
 
+In `nemoclaw-managed` mode, the owner is the source `packaged-service` or `standalone`, and `gatewayAuthority.supervisor` is `null`.
+In `externally-supervised` mode, the owner is the declared supervisor `kind`, `serviceName`, and `execPath`.
 `$$nemoclaw debug` also records `gatewayAuthority` in `onboard-session-summary.txt`.
 The status and debug views omit the external state directory and never include credential values.
 
@@ -207,18 +209,40 @@ It does not transfer process ownership to NemoClaw.
 
 ## Fix a failure
 
+Run `$$nemoclaw status` to read the `Gateway authority` mode before you inspect a service.
+
+### Fix an Externally Supervised Gateway
+
 Resolve an external gateway failure through the declared supervisor.
-For `systemd-system`, inspect the declared service with:
+Replace `<serviceName>` with the `serviceName` value from your declaration.
+For `systemd-system`, inspect the declared unit with the system manager:
 
 ```bash
-systemctl status openshell-gateway.service
+systemctl status <serviceName>
 ```
 
 For `systemd-user`, use the user manager:
 
 ```bash
-systemctl --user status openshell-gateway.service
+systemctl --user status <serviceName>
 ```
 
 Bring the supervised gateway up, leave exactly one verified process holding the configured port, and rerun `$$nemoclaw onboard`.
 To hand the lifecycle back to NemoClaw, remove the platform gateway service and declare `nemoclaw-managed`, or remove the declaration.
+
+### Inspect a NemoClaw-Managed Gateway
+
+In `nemoclaw-managed` mode, no declaration names a unit.
+NemoClaw uses a managed service only for the default gateway port `8080`.
+The service depends on the install.
+
+| Install | Service | Status command |
+|---|---|---|
+| Linux package install | The `openshell-gateway.service` user unit installed by the OpenShell package | `systemctl --user status openshell-gateway` |
+| Linux tarball install | The `nemoclaw-openshell-gateway.service` user unit staged by the NemoClaw installer | `systemctl --user status nemoclaw-openshell-gateway` |
+| macOS with the `nvidia/openshell/openshell` Homebrew formula | The `openshell` formula service | `brew services info openshell` |
+
+Both Linux units belong to the systemd user manager.
+A `systemctl status` command without `--user` reports that the unit cannot be found.
+NemoClaw runs a standalone gateway with no service when no service manager owns the gateway or the gateway uses another port.
+To restart the service or the standalone gateway and recover the sandbox, follow [Reconnect after a host reboot](../reference/troubleshooting#reconnect-after-a-host-reboot).
