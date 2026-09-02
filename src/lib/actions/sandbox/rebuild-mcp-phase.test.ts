@@ -24,7 +24,11 @@ vi.mock("./process-recovery", () => ({
   executeSandboxExecCommand: mocks.executeSandboxExecCommand,
 }));
 
-import { prepareMcpForRebuild, printMcpRebuildRetryCommand } from "./rebuild-mcp-phase";
+import {
+  prepareMcpForRebuild,
+  printMcpRebuildRetryCommand,
+  printMcpRestoreRecovery,
+} from "./rebuild-mcp-phase";
 
 const emptyPreparation = {
   entries: [],
@@ -303,5 +307,41 @@ describe("MCP rebuild retry guidance", () => {
 
     const command = error.mock.calls.flat().find((line) => line.includes("rebuild --yes"));
     expect(command).not.toContain("--dcode-auto-approval");
+  });
+});
+
+describe("MCP restore recovery guidance", () => {
+  it("adds the shields-down step when the rebuild restores lockdown for a shields-gated adapter (#10751)", () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+    printMcpRestoreRecovery("alpha", true, true);
+
+    const lines = log.mock.calls.flat().map(String);
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toContain("then run `nemoclaw alpha mcp restart`");
+    expect(lines[1]).toContain("Shields must be down for `mcp restart`");
+    expect(lines[1]).toContain(
+      'run `nemoclaw alpha shields down --timeout 15m --reason "MCP maintenance"` before the restart',
+    );
+    expect(lines[1]).toContain("then `nemoclaw alpha shields up` after it succeeds");
+  });
+
+  it("keeps the single-line guidance when the retry does not need shields down (#10751)", () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+    printMcpRestoreRecovery("alpha", true, false);
+
+    const lines = log.mock.calls.flat().map(String);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain("then run `nemoclaw alpha mcp restart`");
+    expect(lines[0]).not.toContain("shields");
+  });
+
+  it("prints nothing when MCP restoration was verified (#10751)", () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+    printMcpRestoreRecovery("alpha", false, true);
+
+    expect(log).not.toHaveBeenCalled();
   });
 });

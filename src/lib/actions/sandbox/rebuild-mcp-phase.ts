@@ -181,12 +181,22 @@ export function postRestoreCompleted(status: {
   );
 }
 
+/**
+ * Print the MCP retry guidance. Hermes and OpenClaw refuse `mcp restart`
+ * while shields are up, so the retry needs its own shields-down window when
+ * this rebuild restores lockdown (#10751).
+ */
 export function printMcpRestoreRecovery(
   sandboxName: string,
   mcpBridgeRestoreUnverified: boolean,
+  mcpRestartNeedsShieldsDown: boolean,
 ): void {
   if (!mcpBridgeRestoreUnverified) return;
   console.log(
     `    MCP bridge definitions were preserved but not fully refreshed — fix the reported cause, then run \`${CLI_NAME} ${sandboxName} mcp restart\``,
+  );
+  if (!mcpRestartNeedsShieldsDown) return;
+  console.log(
+    `    Shields must be down for \`mcp restart\`, and this rebuild restores them to UP — run \`${CLI_NAME} ${sandboxName} shields down --timeout 15m --reason "MCP maintenance"\` before the restart, then \`${CLI_NAME} ${sandboxName} shields up\` after it succeeds`,
   );
 }

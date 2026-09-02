@@ -87,6 +87,8 @@ export interface RebuildPostRestorePhaseInput {
   recoveryRecreate: boolean;
   preparedBackupRecovery: boolean;
   staleSandboxWasLocked: boolean;
+  /** Rebuild restores this posture, so a shields-gated MCP retry needs a new shields-down window. */
+  shieldsUpBeforeRebuild: boolean;
   versionCheck: ReturnType<typeof sandboxVersion.checkAgentVersion>;
   relockShieldsIfNeeded: (sandboxStillExists: boolean) => boolean;
   log: RebuildLog;
@@ -126,6 +128,7 @@ export async function runRebuildPostRestorePhase(
     recoveryRecreate,
     preparedBackupRecovery,
     staleSandboxWasLocked,
+    shieldsUpBeforeRebuild,
     versionCheck,
     relockShieldsIfNeeded,
     log,
@@ -158,6 +161,10 @@ export async function runRebuildPostRestorePhase(
   }
   const agentDef = loadAgent(targetAgentName);
   const rebuiltAgentName = agentDef.displayName;
+  // The hermes-config and mcporter adapters refuse MCP config mutation while
+  // shields are up; deepagents-config does not check shields.
+  const mcpRestartNeedsShieldsDown =
+    shieldsUpBeforeRebuild && (targetAgentName === "hermes" || targetAgentName === "openclaw");
   let mutablePermsRepairUnverified = false;
   let mutableConfigHashRefreshUnverified = false;
   let finalMutableConfigHashUnverified = false;
@@ -306,7 +313,9 @@ export async function runRebuildPostRestorePhase(
         "  Hermes cron dispatch remains drained because the replacement gateway was not verified.",
         "Hermes cron restore validation failed; dispatch was not re-enabled.",
         bail,
-        mcpBridgeRestoreUnverified ? () => printMcpRestoreRecovery(sandboxName, true) : undefined,
+        mcpBridgeRestoreUnverified
+          ? () => printMcpRestoreRecovery(sandboxName, true, mcpRestartNeedsShieldsDown)
+          : undefined,
       );
     }
     if (mcpBridgeRestoreUnverified) {
@@ -316,7 +325,7 @@ export async function runRebuildPostRestorePhase(
         "  Hermes cron dispatch remains drained because managed MCP restoration was not verified.",
         "Hermes MCP restoration failed; cron dispatch was not re-enabled.",
         bail,
-        () => printMcpRestoreRecovery(sandboxName, true),
+        () => printMcpRestoreRecovery(sandboxName, true, mcpRestartNeedsShieldsDown),
       );
     }
     let completedIdentity: HermesCronRestoreIdentity;
@@ -420,7 +429,7 @@ export async function runRebuildPostRestorePhase(
       );
     }
     printHermesGatewayRestoreRecovery(sandboxName, hermesGatewayRestoreState);
-    printMcpRestoreRecovery(sandboxName, mcpBridgeRestoreUnverified);
+    printMcpRestoreRecovery(sandboxName, mcpBridgeRestoreUnverified, mcpRestartNeedsShieldsDown);
   }
   if (recoveryRecreate && staleSandboxWasLocked) {
     console.log(

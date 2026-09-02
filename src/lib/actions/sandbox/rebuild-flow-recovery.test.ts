@@ -614,4 +614,39 @@ describe("rebuildSandbox flow: recovery", () => {
       expect.stringContaining("MCP bridge restore incomplete; inspect redacted diagnostics"),
     );
   });
+
+  it("tells a rebuild that restores lockdown to lower shields before the MCP restart it prescribes (#10751)", async () => {
+    const mcpEntry = {
+      server: "github",
+      providerName: "nemoclaw-mcp-alpha-github",
+    };
+    const harness = createRebuildFlowHarness({
+      applyPreset: () => false,
+      mcpPreparation: {
+        entries: [mcpEntry],
+        detachedProviderEntries: [mcpEntry],
+      },
+      openShieldsWindow: () => ({ relocked: false, wasLocked: true }),
+      restoreMcpBridgesAfterRebuild: () => Promise.reject(new Error("MCP restore boom")),
+    });
+
+    await expect(
+      harness.rebuildSandbox("alpha", ["--yes"], { throwOnError: true }),
+    ).resolves.toBeUndefined();
+
+    const outputLines = harness.logSpy.mock.calls.map((call) => String(call[0]));
+    const restartLine = outputLines.findIndex((line) =>
+      line.includes("then run `nemoclaw alpha mcp restart`"),
+    );
+    expect(restartLine).toBeGreaterThanOrEqual(0);
+    expect(outputLines[restartLine + 1]).toContain(
+      'run `nemoclaw alpha shields down --timeout 15m --reason "MCP maintenance"` before the restart',
+    );
+    expect(harness.relockSpy).toHaveBeenCalledWith(
+      "alpha",
+      expect.objectContaining({ wasLocked: true }),
+      true,
+      "nemoclaw",
+    );
+  });
 });

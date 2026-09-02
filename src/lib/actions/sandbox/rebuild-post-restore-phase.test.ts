@@ -16,7 +16,7 @@ import { runRebuildPostRestorePhase } from "./rebuild-post-restore-phase";
 import * as sessionModels from "./reconcile-session-models";
 
 describe("rebuild post-restore phase", () => {
-  let agentName: "openclaw" | "hermes";
+  let agentName: "openclaw" | "hermes" | "langchain-deepagents-code";
   let order: string[];
 
   beforeEach(() => {
@@ -121,6 +121,7 @@ describe("rebuild post-restore phase", () => {
       recoveryRecreate: false,
       preparedBackupRecovery: false,
       staleSandboxWasLocked: false,
+      shieldsUpBeforeRebuild: false,
       versionCheck: { expectedVersion: null } as never,
       relockShieldsIfNeeded: vi.fn(() => true),
       log: vi.fn(),
@@ -764,5 +765,89 @@ describe("rebuild post-restore phase", () => {
     expect(vi.mocked(console.error).mock.calls.flat().join("\n")).toContain(
       "nemoclaw alpha rebuild",
     );
+  });
+
+  it.each(["openclaw", "hermes"] as const)(
+    "tells a %s rebuild that restores lockdown to lower shields before the MCP restart (#10751)",
+    async (agent) => {
+      agentName = agent;
+      vi.mocked(rebuildMcp.restoreMcpAfterRebuild).mockResolvedValue(false);
+      const args = { ...input(), shieldsUpBeforeRebuild: true };
+
+      await runRebuildPostRestorePhase(args);
+
+      const outputLines = vi.mocked(console.log).mock.calls.flat().map(String);
+      const restartLine = outputLines.findIndex((line) =>
+        line.includes("then run `nemoclaw alpha mcp restart`"),
+      );
+      expect(restartLine).toBeGreaterThanOrEqual(0);
+      expect(outputLines[restartLine + 1]).toContain(
+        'run `nemoclaw alpha shields down --timeout 15m --reason "MCP maintenance"` before the restart',
+      );
+      expect(outputLines[restartLine + 1]).toContain(
+        "then `nemoclaw alpha shields up` after it succeeds",
+      );
+      expect(args.relockShieldsIfNeeded).toHaveBeenCalledWith(true);
+    },
+  );
+
+  it("keeps the MCP restart guidance shields-free when the rebuild started with shields down (#10751)", async () => {
+    agentName = "hermes";
+    vi.mocked(rebuildMcp.restoreMcpAfterRebuild).mockResolvedValue(false);
+    const args = input();
+
+    await runRebuildPostRestorePhase(args);
+
+    const output = vi.mocked(console.log).mock.calls.flat().join("\n");
+    expect(output).toContain("then run `nemoclaw alpha mcp restart`");
+    expect(output).not.toContain("shields down");
+  });
+
+  it("keeps the MCP restart guidance shields-free for a Deep Agents rebuild (#10751)", async () => {
+    agentName = "langchain-deepagents-code";
+    vi.mocked(rebuildMcp.restoreMcpAfterRebuild).mockResolvedValue(false);
+    const args = { ...input(), shieldsUpBeforeRebuild: true };
+
+    await runRebuildPostRestorePhase(args);
+
+    const output = vi.mocked(console.log).mock.calls.flat().join("\n");
+    expect(output).toContain("then run `nemoclaw alpha mcp restart`");
+    expect(output).not.toContain("shields down");
+  });
+
+  it("prints the shields-down step with the cron-gate MCP recovery before cron recovery (#10751)", async () => {
+    agentName = "hermes";
+    vi.mocked(rebuildMcp.restoreMcpAfterRebuild).mockResolvedValue(false);
+    const args = {
+      ...input(),
+      shieldsUpBeforeRebuild: true,
+      hermesCronRestoreIdentity: {
+        pid: 41,
+        start_time: 902,
+        drain_token: "restore-token",
+      },
+    };
+
+    await runRebuildPostRestorePhase(args);
+
+    expect(args.bail).toHaveBeenCalledWith(
+      "Hermes MCP restoration failed; cron dispatch was not re-enabled.",
+    );
+    const shieldsCall = vi
+      .mocked(console.log)
+      .mock.calls.findIndex((call) =>
+        String(call[0]).includes(
+          'nemoclaw alpha shields down --timeout 15m --reason "MCP maintenance"',
+        ),
+      );
+    const recoverCall = vi
+      .mocked(console.error)
+      .mock.calls.findIndex((call) => String(call[0]).includes("nemoclaw alpha recover"));
+    expect(shieldsCall).toBeGreaterThanOrEqual(0);
+    expect(recoverCall).toBeGreaterThanOrEqual(0);
+    expect(vi.mocked(console.log).mock.invocationCallOrder[shieldsCall]).toBeLessThan(
+      vi.mocked(console.error).mock.invocationCallOrder[recoverCall] ?? 0,
+    );
+    expect(args.relockShieldsIfNeeded).not.toHaveBeenCalled();
   });
 });

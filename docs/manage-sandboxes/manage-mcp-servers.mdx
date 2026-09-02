@@ -175,6 +175,13 @@ The replacement image must expose managed MCP capability v2 before NemoClaw rest
 
 If sandbox replacement fails, NemoClaw attempts to restore the previous attachment and adapter state at the path used by the surviving image. A later `mcp restart` can retry an incomplete post-rebuild restore.
 
+<AgentOnly variant="openclaw,hermes">
+
+Shields must be down for `mcp restart`, and a rebuild that started with shields up restores them to UP.
+Run `$$nemoclaw my-sandbox shields down --timeout 15m --reason "MCP maintenance"` before the restart, then `$$nemoclaw my-sandbox shields up` after it succeeds.
+
+</AgentOnly>
+
 ## Destroy a Sandbox with MCP State
 
 Destroy removes adapter entries and exact owned policies, then detaches providers that match recorded metadata before asking OpenShell to delete the sandbox. Before changing each managed adapter, a fresh sandbox process must expose a revision-scoped OpenShell credential placeholder for that adapter. If an observation is absent, unscoped, or unavailable, NemoClaw leaves the affected adapter and every provider unchanged. It attempts to restore adapter entries prepared earlier in the operation and reports rollback failures. Follow the reported [credential-revision recovery](../../reference/troubleshoot-mcp-servers#rebuild-or-destroy-cannot-prove-a-credential-revision), then retry destroy. If deletion is refused, NemoClaw attempts to restore previous MCP state, reports rollback failures, and preserves recovery state. Provider deletion and registry cleanup happen only after OpenShell confirms the sandbox is gone.
