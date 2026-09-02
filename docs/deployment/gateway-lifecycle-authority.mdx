@@ -211,7 +211,7 @@ It does not transfer process ownership to NemoClaw.
 
 Run `$$nemoclaw status` to read the `Gateway authority` mode before you inspect a service.
 
-### Fix an Externally Supervised Gateway
+### Fix an externally supervised gateway
 
 Resolve an external gateway failure through the declared supervisor.
 Replace `<serviceName>` with the `serviceName` value from your declaration.
@@ -230,7 +230,7 @@ systemctl --user status <serviceName>
 Bring the supervised gateway up, leave exactly one verified process holding the configured port, and rerun `$$nemoclaw onboard`.
 To hand the lifecycle back to NemoClaw, remove the platform gateway service and declare `nemoclaw-managed`, or remove the declaration.
 
-### Inspect a NemoClaw-Managed Gateway
+### Inspect a NemoClaw-managed gateway
 
 In `nemoclaw-managed` mode, no declaration names a unit.
 NemoClaw uses a managed service only for the default gateway port `8080`.
