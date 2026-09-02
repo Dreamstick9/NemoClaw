@@ -21,9 +21,11 @@ import {
   type OpenShellSandboxPolicySetSubmission,
   type OpenShellSandboxResult,
 } from "../adapters/openshell/sandbox-policy-cli";
-import { PolicyObservationError } from "../adapters/openshell/policy-state";
+import {
+  isPolicyObservationError,
+  PolicyObservationError,
+} from "../adapters/openshell/policy-state";
 export {
-  isPolicyAuthorityUnobservable,
   isPolicyObservationError,
   PolicyObservationError,
 } from "../adapters/openshell/policy-state";
@@ -650,6 +652,17 @@ function requirePolicyObservation<T>(result: OpenShellSandboxResult<T>, gatewayN
     `OpenShell sandbox policy inspection failed: ${result.error.message}${punctuation} Policy-dependent operations must stop.`,
     { policyReadError: result.error, gatewayName },
   );
+}
+
+/**
+ * Recognize an observation failure whose live OpenShell read did not complete.
+ * A rejected write, a changed policy, or a read-back mismatch is also an
+ * observation failure, but OpenShell answered those.
+ */
+export function isPolicyAuthorityUnobservable(error: unknown): error is PolicyObservationError & {
+  readonly policyReadError: NonNullable<PolicyObservationError["policyReadError"]>;
+} {
+  return isPolicyObservationError(error) && error.policyReadError !== undefined;
 }
 
 function readLivePolicyDocument(

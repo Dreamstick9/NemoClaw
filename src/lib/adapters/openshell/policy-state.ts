@@ -38,17 +38,6 @@ export function isPolicyObservationError(error: unknown): error is PolicyObserva
   );
 }
 
-/**
- * Recognize an observation failure whose live OpenShell read did not complete.
- * A rejected write, a changed policy, or a read-back mismatch is also an
- * observation failure, but OpenShell answered those.
- */
-export function isPolicyAuthorityUnobservable(
-  error: unknown,
-): error is PolicyObservationError & { readonly policyReadError: OpenShellSandboxError } {
-  return isPolicyObservationError(error) && error.policyReadError !== undefined;
-}
-
 function isObject(value: unknown): value is JsonObject {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
