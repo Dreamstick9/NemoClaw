@@ -2187,7 +2187,11 @@ function failInlineAutoRestoreWithoutPolicyAuthority(
 ): never {
   const retryCommand = `${CLI_NAME} ${sandboxName} shields status`;
   const recovery = failure.policyReadError
-    ? formatOpenShellPolicyRecoveryAction(failure.policyReadError, retryCommand)
+    ? formatOpenShellPolicyRecoveryAction(
+        failure.policyReadError,
+        retryCommand,
+        failure.gatewayName,
+      )
     : `Correct the reported policy failure, then retry \`${retryCommand}\`.`;
   const punctuation = /[.!?]$/u.test(failure.message) ? "" : ".";
   const message = `Inline auto-restore exhausted ${String(
@@ -2204,6 +2208,7 @@ function failInlineAutoRestoreWithoutPolicyAuthority(
   throw new PolicyObservationError(message, {
     cause: failure,
     policyReadError: failure.policyReadError,
+    gatewayName: failure.gatewayName,
   });
 }
 
@@ -4486,7 +4491,7 @@ function applyShieldsPolicySnapshot(
   if (!livePolicyRead.ok) {
     throw new PolicyObservationError(
       shieldsPolicyReadFailureMessage(sandboxName, context.gatewayName, livePolicyRead.error),
-      { policyReadError: livePolicyRead.error },
+      { policyReadError: livePolicyRead.error, gatewayName: context.gatewayName },
     );
   }
   const livePolicy = livePolicyRead.value.document;

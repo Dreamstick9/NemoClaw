@@ -165,7 +165,7 @@ describe("getSandboxPolicy", () => {
       );
 
       expect(failure).toBeInstanceOf(PolicyObservationError);
-      expect(failure).toMatchObject({ policyReadError: error });
+      expect(failure).toMatchObject({ policyReadError: error, gatewayName: "nemoclaw-18080" });
       expect((failure as Error).message).toContain("sandbox 'alpha'");
       expect((failure as Error).message).toContain("recorded gateway 'nemoclaw-18080'");
       expect((failure as Error).message).toContain(recovery);

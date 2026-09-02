@@ -11,14 +11,20 @@ const POLICY_OBSERVATION_ERROR_CODE = "NEMOCLAW_POLICY_OBSERVATION_ERROR";
 export class PolicyObservationError extends Error {
   readonly code = POLICY_OBSERVATION_ERROR_CODE;
   readonly policyReadError: OpenShellSandboxError | undefined;
+  /** The recorded gateway the failed read targeted, so recovery guidance can name it. */
+  readonly gatewayName: string | undefined;
 
   constructor(
     message: string,
-    options?: ErrorOptions & { readonly policyReadError?: OpenShellSandboxError },
+    options?: ErrorOptions & {
+      readonly policyReadError?: OpenShellSandboxError;
+      readonly gatewayName?: string;
+    },
   ) {
     super(message, options);
     this.name = "PolicyObservationError";
     this.policyReadError = options?.policyReadError;
+    this.gatewayName = options?.gatewayName;
   }
 }
 

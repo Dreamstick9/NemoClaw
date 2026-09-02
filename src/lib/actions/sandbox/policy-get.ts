@@ -56,7 +56,7 @@ async function readSandboxPolicy(
       : "";
     throw new PolicyObservationError(
       `Failed to retrieve base policy for sandbox '${sandboxName}'. ${policyReadError.message} ${gatewayContext}${recovery}`,
-      { policyReadError },
+      { policyReadError, gatewayName: recordedGatewayName ?? undefined },
     );
   }
   const display = redactOpenShellSandboxPolicyReadForDisplay({

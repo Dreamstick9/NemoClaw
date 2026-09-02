@@ -643,12 +643,12 @@ export interface PolicyMutationContext {
   readonly basePolicyDocument: string;
 }
 
-function requirePolicyObservation<T>(result: OpenShellSandboxResult<T>): T {
+function requirePolicyObservation<T>(result: OpenShellSandboxResult<T>, gatewayName: string): T {
   if (result.ok) return result.value;
   const punctuation = /[.!?]$/u.test(result.error.message) ? "" : ".";
   throw new PolicyObservationError(
     `OpenShell sandbox policy inspection failed: ${result.error.message}${punctuation} Policy-dependent operations must stop.`,
-    { policyReadError: result.error },
+    { policyReadError: result.error, gatewayName },
   );
 }
 
@@ -665,6 +665,7 @@ function readLivePolicyDocument(
       scope,
       ...(timeoutMs === undefined ? {} : { timeoutMs }),
     }),
+    gatewayName,
   ).document;
 }
 
@@ -679,6 +680,7 @@ function readLivePolicyRevision(
       sandboxName,
       revision,
     }),
+    gatewayName,
   ).document;
 }
 
@@ -725,6 +727,7 @@ function inspectLivePolicyBoundary(
   const target = namedOpenShellGateway(gatewayName);
   const inspection = requirePolicyObservation(
     syncCliOpenShellSandboxPolicyReader.inspectSandboxPolicy({ target, sandboxName }),
+    gatewayName,
   );
   const basePolicyDocument = readLivePolicyDocument(sandboxName, gatewayName, "base");
   return { gatewayName, inspection, basePolicyDocument };

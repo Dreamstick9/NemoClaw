@@ -47,7 +47,9 @@ import {
   confirmAppliedPolicySetSubmission,
   excludeBaselineEntry,
   inspectPolicyMutationContext,
+  isPolicyAuthorityUnobservable,
   loadPresetForSandbox,
+  PolicyObservationError,
   removePreset,
   restoreBaselineEntry,
   setPolicyDocument,
@@ -384,6 +386,33 @@ describe("live OpenShell policy mutations", () => {
     );
     expect(applyPresets(sandboxName, ["npm"])).toBe(false);
     expect(mocks.setSandboxPolicy).not.toHaveBeenCalled();
+  });
+
+  it("binds the recorded gateway to a live-policy read that did not complete (#10878)", () => {
+    const readError = {
+      kind: "command" as const,
+      reason: "failed" as const,
+      message: "failed to connect to OpenShell server",
+    };
+    mocks.readSandboxPolicy.mockReturnValue({ ok: false, error: readError });
+
+    let failure: unknown;
+    try {
+      inspectPolicyMutationContext(sandboxName, "inspect policy");
+    } catch (error) {
+      failure = error;
+    }
+
+    expect(isPolicyAuthorityUnobservable(failure)).toBe(true);
+    expect(failure).toMatchObject({ gatewayName: "nemoclaw", policyReadError: readError });
+    expect(String(failure)).toContain("Policy-dependent operations must stop.");
+    // An observation failure OpenShell answered carries no read error and is
+    // not an unobservable authority.
+    expect(
+      isPolicyAuthorityUnobservable(
+        new PolicyObservationError("Refusing to apply policy: OpenShell rejected the change."),
+      ),
+    ).toBe(false);
   });
 
   it("derives custom preset identity from namespaced OpenShell keys", () => {

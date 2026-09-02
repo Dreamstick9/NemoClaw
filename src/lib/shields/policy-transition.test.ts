@@ -1230,11 +1230,13 @@ describe("shields-down rollback flow", () => {
     ) as typeof import("../adapters/openshell/policy-state.js");
   }
 
-  // The read never completed: the same class as the issue's failed policy query.
+  // The read never completed: the same class and gateway binding the policy
+  // boundary attaches to the issue's failed policy query.
   function policyOutage(): never {
     throw new (policyStateModule().PolicyObservationError)(
       "OpenShell sandbox policy inspection failed: the policy query did not complete successfully. Policy-dependent operations must stop.",
       {
+        gatewayName: "nemoclaw",
         policyReadError: {
           kind: "command",
           reason: "failed",
@@ -1253,21 +1255,30 @@ describe("shields-down rollback flow", () => {
       processToken,
       "restart recovery test",
     );
-    const waitSpy = vi.spyOn(Atomics, "wait").mockReturnValue("timed-out");
+    vi.spyOn(Atomics, "wait").mockReturnValue("timed-out");
     const harness = createHarness({ confirmOpenClawInodeFlags: true });
     const gatewayAnswers = harness.policyRecoveryAuthoritySpy.getMockImplementation()!;
     harness.policyRecoveryAuthoritySpy.mockImplementation(policyOutage);
 
-    expect(() => harness.shieldsStatus("openclaw")).toThrow(
+    let outage: unknown;
+    try {
+      harness.shieldsStatus("openclaw");
+    } catch (error) {
+      outage = error;
+    }
+    expect(String(outage)).toMatch(
       /exhausted 7 attempts because the OpenShell policy authority could not be observed/u,
     );
+    expect(String(outage)).toContain("openshell gateway select nemoclaw");
+    expect(String(outage)).toContain("retry `nemoclaw openclaw shields status`");
+    // The documented budget: seven attempts, each stopped by the failed read.
+    expect(harness.policyRecoveryAuthoritySpy).toHaveBeenCalledTimes(7);
 
     expect(fs.existsSync(containmentPath)).toBe(false);
     expect(fs.existsSync(lockPath)).toBe(false);
     expect(fs.existsSync(`${lockPath}.deadline`)).toBe(false);
     expect(fs.existsSync(timerMarkerPath)).toBe(true);
     expect(JSON.parse(fs.readFileSync(statePath, "utf-8"))).toMatchObject({ shieldsDown: true });
-    expect(waitSpy.mock.calls.filter((call) => call[3] === 5_000)).toHaveLength(6);
     expect(harness.runSpy).not.toHaveBeenCalledWith(
       ["openshell", "policy", "set", "-g", "nemoclaw"],
       expect.anything(),
