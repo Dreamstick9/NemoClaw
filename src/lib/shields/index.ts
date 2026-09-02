@@ -44,6 +44,7 @@ const {
   confirmAppliedPolicySetSubmission: confirmAppliedShieldsPolicySetSubmission,
   resolvePermissivePolicyPath,
   inspectPolicyMutationContext,
+  isPolicyAuthorityUnobservable,
   isPolicyObservationError,
   PolicyObservationError,
   recheckPolicyMutationContext,
@@ -2212,8 +2213,9 @@ function retryInlineAutoRestore(
 ): void {
   let notifiedError: string | null = null;
   // Durable containment answers ownership ambiguity. An OpenShell policy
-  // authority that cannot be observed is an external outage, so the final
-  // attempt's failure class decides whether containment is recorded.
+  // authority that cannot be read is an external outage, so the final
+  // attempt's failure class decides whether containment is recorded. A
+  // failure OpenShell answered, such as a rejected write, still contains.
   let policyObservationFailure: PolicyObservationError | null = null;
   for (let attempt = 0; attempt < INTERACTIVE_AUTO_RESTORE_MAX_ATTEMPTS; attempt += 1) {
     try {
@@ -2238,7 +2240,7 @@ function retryInlineAutoRestore(
     } catch (error) {
       if (isDurableContainmentFailure(error)) throw error;
       assertTimerMarkerGeneration(sandboxName, marker);
-      policyObservationFailure = isPolicyObservationError(error) ? error : null;
+      policyObservationFailure = isPolicyAuthorityUnobservable(error) ? error : null;
       const message = error instanceof Error ? error.message : String(error);
       if (message !== notifiedError) {
         appendAuditEntryBestEffort({
@@ -2378,7 +2380,7 @@ function withExpiredAutoRestoreDeadlineFence<T>(
         } catch (error) {
           if (isDurableContainmentFailure(error)) throw error;
           assertTakeoverAuthority();
-          if (isPolicyObservationError(error)) throw error;
+          if (isPolicyAuthorityUnobservable(error)) throw error;
           if (fs.existsSync(`${getMcpLifecycleLockPath(sandboxName, STATE_DIR)}.containment`)) {
             throw error;
           }
@@ -4754,9 +4756,9 @@ function recoverExpiredAutoRestoreInline(
       if (isDurableContainmentFailure(error)) throw error;
       const message = error instanceof Error ? error.message : String(error);
       console.error(`  Recovery warning: ${message}`);
-      // The expired-timer retry loop audits an unobservable policy authority
+      // The expired-timer retry loop audits an unreadable policy authority
       // once and decides the terminal outcome.
-      if (isPolicyObservationError(error)) throw error;
+      if (isPolicyAuthorityUnobservable(error)) throw error;
       appendAuditEntry({
         action: "shields_up_failed",
         sandbox: sandboxName,
@@ -4788,7 +4790,7 @@ function recoverExpiredAutoRestoreInline(
     !activation.ok &&
     recoveryProcessToken !== undefined &&
     recoveryProcessToken === marker?.processToken &&
-    isPolicyObservationError(activation.cause)
+    isPolicyAuthorityUnobservable(activation.cause)
   ) {
     console.error(`  Recovery warning: ${activation.cause.message}`);
     throw activation.cause;

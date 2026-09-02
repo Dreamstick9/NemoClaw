@@ -23,6 +23,7 @@ import {
 } from "../adapters/openshell/sandbox-policy-cli";
 import { PolicyObservationError } from "../adapters/openshell/policy-state";
 export {
+  isPolicyAuthorityUnobservable,
   isPolicyObservationError,
   PolicyObservationError,
 } from "../adapters/openshell/policy-state";

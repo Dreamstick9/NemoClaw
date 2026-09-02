@@ -1182,23 +1182,6 @@ describe("shields-down rollback flow", () => {
     );
     expect(output).not.toContain("scheduled auto-restore remains authoritative");
   });
-});
-
-describe("expired auto-restore during an OpenShell policy outage", () => {
-  let tmpDir: string;
-  const policyOutageMessage =
-    "OpenShell sandbox policy inspection failed: failed to connect to OpenShell server. Policy-dependent operations must stop.";
-
-  function createHarness(options: ShieldsFlowHarnessOptions = {}) {
-    return createShieldsFlowHarness(requireSource, tmpDir, options);
-  }
-
-  function policyOutage(): never {
-    const policyState = requireSource(
-      "../adapters/openshell/policy-state.js",
-    ) as typeof import("../adapters/openshell/policy-state.js");
-    throw new policyState.PolicyObservationError(policyOutageMessage);
-  }
 
   // The state a host restart leaves behind: the timer process is gone, its
   // deadline has passed, the shields-down transition is still bound, and no
@@ -1241,24 +1224,27 @@ describe("expired auto-restore during an OpenShell policy outage", () => {
     return { statePath, timerMarkerPath };
   }
 
-  beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "shields-policy-outage-"));
-    vi.stubEnv("HOME", tmpDir);
-  });
+  function policyStateModule() {
+    return requireSource(
+      "../adapters/openshell/policy-state.js",
+    ) as typeof import("../adapters/openshell/policy-state.js");
+  }
 
-  afterEach(() => {
-    vi.restoreAllMocks();
-    vi.unstubAllEnvs();
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-    delete require.cache[requireSource.resolve(SHIELDS_MODULE)];
-    delete require.cache[requireSource.resolve("./timer-bound-lock.js")];
-    delete require.cache[requireSource.resolve("./transition-lock.js")];
-    delete require.cache[requireSource.resolve("./permissive-runtime.js")];
-    delete require.cache[requireSource.resolve("../actions/sandbox/mcp-bridge-policy.js")];
-    delete require.cache[requireSource.resolve("../cli/branding.js")];
-  });
+  // The read never completed: the same class as the issue's failed policy query.
+  function policyOutage(): never {
+    throw new (policyStateModule().PolicyObservationError)(
+      "OpenShell sandbox policy inspection failed: the policy query did not complete successfully. Policy-dependent operations must stop.",
+      {
+        policyReadError: {
+          kind: "command",
+          reason: "failed",
+          message: "failed to connect to OpenShell server",
+        },
+      },
+    );
+  }
 
-  it("reports an unreachable policy authority after expired auto-restore retries and restores lockdown once it answers (#10878)", () => {
+  it("reports an unreadable policy authority after expired auto-restore retries and restores lockdown once it answers (#10878)", () => {
     const processToken = "3".repeat(32);
     const lifecycleLock = requireSource("../state/mcp-lifecycle-lock.js");
     const lockPath = lifecycleLock.getMcpLifecycleLockPath("openclaw");
@@ -1291,12 +1277,20 @@ describe("expired auto-restore during an OpenShell policy outage", () => {
       .filter((entry) => entry.action === "shields_up_failed")
       .map((entry) => entry.error);
     expect(failures).toEqual([
-      expect.stringContaining("failed to connect to OpenShell server"),
+      expect.stringContaining("the policy query did not complete successfully"),
       expect.stringContaining("no lifecycle-lock cleanup is required"),
     ]);
     expect(harness.errorSpy.mock.calls.flat().join("\n")).toContain(
       "Recovery warning: OpenShell sandbox policy inspection failed",
     );
+    // The retained expired timer marker is the mutation gate: an ordinary
+    // sandbox mutation still waits at that gate instead of being admitted.
+    expect(() =>
+      lifecycleLock.withMcpLifecycleLockSync("openclaw", () => "admitted", {
+        pollIntervalMs: 10,
+        timeoutMs: 100,
+      }),
+    ).toThrow(/Timed out waiting for (the )?sandbox mutation lock/u);
 
     harness.policyRecoveryAuthoritySpy.mockImplementation(gatewayAnswers);
     harness.auditSpy.mockClear();
@@ -1321,6 +1315,7 @@ describe("expired auto-restore during an OpenShell policy outage", () => {
       }),
     );
     expect(harness.logSpy).toHaveBeenCalledWith("  Shields: UP (lockdown active)");
+    expect(lifecycleLock.withMcpLifecycleLockSync("openclaw", () => "admitted")).toBe("admitted");
   });
 
   it("still records containment when the final expired auto-restore attempt fails after the policy authority answers (#10878)", () => {
@@ -1336,7 +1331,13 @@ describe("expired auto-restore during an OpenShell policy outage", () => {
       confirmOpenClawInodeFlags: true,
       failOpenClawGuardActions: ["lock"],
     });
-    // Six outages, then the harness default answers for the final attempt.
+    const gatewayAnswers = harness.policyRecoveryAuthoritySpy.getMockImplementation()!;
+    let answers = 0;
+    harness.policyRecoveryAuthoritySpy.mockImplementation((...args) => {
+      answers += 1;
+      return gatewayAnswers(...args);
+    });
+    // Six outages, then the gateway answers for the final attempt.
     harness.policyRecoveryAuthoritySpy
       .mockImplementationOnce(policyOutage)
       .mockImplementationOnce(policyOutage)
@@ -1349,9 +1350,32 @@ describe("expired auto-restore during an OpenShell policy outage", () => {
       "Inline auto-restore exhausted 7 attempts: Inline auto-restore did not complete; retrying under the lifecycle gate. Durable sandbox mutation containment requires operator resolution",
     );
 
-    // Six failed reads, then the final attempt reads twice: the handoff
-    // restore and the snapshot activation that precedes the failing lock.
-    expect(harness.policyRecoveryAuthoritySpy).toHaveBeenCalledTimes(8);
+    expect(answers).toBeGreaterThan(0);
+    expect(fs.existsSync(containmentPath)).toBe(true);
+    expect(fs.existsSync(timerMarkerPath)).toBe(true);
+    expect(JSON.parse(fs.readFileSync(statePath, "utf-8"))).toMatchObject({ shieldsDown: true });
+  });
+
+  it("still records containment when the policy authority answers but the restored policy cannot be verified (#10878)", () => {
+    const processToken = "1".repeat(32);
+    const lifecycleLock = requireSource("../state/mcp-lifecycle-lock.js");
+    const containmentPath = `${lifecycleLock.getMcpLifecycleLockPath("openclaw")}.containment`;
+    const { statePath, timerMarkerPath } = writeExpiredShieldsFixtureAfterHostRestart(
+      processToken,
+      "restart recovery with an unverified restore",
+    );
+    vi.spyOn(Atomics, "wait").mockReturnValue("timed-out");
+    const harness = createHarness({ confirmOpenClawInodeFlags: true });
+    harness.policyVerificationSpy.mockImplementation(() => {
+      throw new (policyStateModule().PolicyObservationError)(
+        "Refusing to restore the Shields policy snapshot: the applied policy did not match the desired document.",
+      );
+    });
+
+    expect(() => harness.shieldsStatus("openclaw")).toThrow(
+      "Durable sandbox mutation containment requires operator resolution",
+    );
+
     expect(fs.existsSync(containmentPath)).toBe(true);
     expect(fs.existsSync(timerMarkerPath)).toBe(true);
     expect(JSON.parse(fs.readFileSync(statePath, "utf-8"))).toMatchObject({ shieldsDown: true });
