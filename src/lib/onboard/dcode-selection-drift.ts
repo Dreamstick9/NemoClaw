@@ -3,14 +3,9 @@
 
 import { getSandboxInferenceConfig } from "../inference/config";
 import { resolveManagedDcodeIdentity } from "../inference/managed-dcode/identity";
-import type { SelectionDrift } from "./selection-drift";
+import type { SelectionDrift, SelectionIdentity } from "./selection-drift";
 
-export type DcodeInferenceIdentity = {
-  route: string;
-  provider: string;
-  model: string;
-  endpoint: string;
-};
+export type DcodeInferenceIdentity = SelectionIdentity;
 
 export type DcodeSelectionDriftDeps = {
   getGatewayName(): string;
@@ -123,7 +118,12 @@ export function getDcodeSelectionDrift(
     preferredInferenceApi,
     deps.requestedEndpointUrl,
   );
-  if (!sandboxName || !expected) return { ...UNKNOWN_SELECTION_DRIFT };
+  const unreadable = (): SelectionDrift => ({
+    ...UNKNOWN_SELECTION_DRIFT,
+    expectedIdentity: expected,
+    existingIdentity: null,
+  });
+  if (!sandboxName || !expected) return unreadable();
 
   let output: string | null | undefined;
   try {
@@ -142,11 +142,11 @@ export function getDcodeSelectionDrift(
       { ignoreError: true },
     );
   } catch {
-    return { ...UNKNOWN_SELECTION_DRIFT };
+    return unreadable();
   }
 
   const existing = parseDcodeInferenceIdentity(output);
-  if (!existing) return { ...UNKNOWN_SELECTION_DRIFT };
+  if (!existing) return unreadable();
 
   const providerChanged =
     existing.provider !== expected.provider ||
@@ -160,6 +160,8 @@ export function getDcodeSelectionDrift(
     existingProvider: existing.provider,
     existingModel: existing.model,
     unknown: false,
+    expectedIdentity: expected,
+    existingIdentity: existing,
   };
 }
 

@@ -145,6 +145,70 @@ function executable(file: string, contents: string): void {
   fs.writeFileSync(file, contents, { mode: 0o755 });
 }
 
+const DRIFTED_DCODE_PROBE = [
+  "Route:    inference",
+  "Provider: nvidia-prod",
+  "Model:    openai:old-model",
+  "Endpoint: https://inference.local/v1",
+].join("\n");
+
+/** Run managed DCode finalization against one live `dcode identity` probe result. */
+function finalizeDcodeWithProbe(probeOutput: string | null): {
+  error: ReturnType<typeof vi.fn>;
+  register: ReturnType<typeof vi.fn>;
+} {
+  const register = vi.fn();
+  const error = vi.fn();
+  expect(() =>
+    finalizeCreatedSandbox(
+      {
+        sandboxName: "dcode",
+        restoreBackupPath: null,
+        preUpgradeBackup: false,
+        targetAgentType: "langchain-deepagents-code",
+        validateManagedDcode: true,
+        provider: "nvidia-prod",
+        model: "new-model",
+        preferredInferenceApi: null,
+      },
+      {
+        discoverFreshOpenClawImagePluginInstalls: vi.fn(),
+        restoreRecreatedSandboxState: vi.fn(),
+        getDcodeSelectionDrift: (name, provider, model, api) =>
+          getDcodeSelectionDrift(name, provider, model, api, {
+            getGatewayName: () => "nemoclaw-18081",
+            runCaptureOpenshell: () => probeOutput,
+          }),
+        register,
+        note: vi.fn(),
+        error,
+        exitProcess: (code): never => {
+          throw new Error(`exit ${code}`);
+        },
+      },
+    ),
+  ).toThrow("exit 1");
+  expect(register).not.toHaveBeenCalled();
+  return { error, register };
+}
+
+function expectDestroyFirstRecovery(
+  error: ReturnType<typeof vi.fn>,
+  sandboxName: string,
+  onboardCommand: string,
+): void {
+  expect(error).toHaveBeenCalledWith(
+    `  Run \`nemoclaw ${sandboxName} destroy\` to attempt identity-bound recovery; onboarding refuses resume, reuse, recreation, and same-name fresh onboarding while its retained recovery record exists.`,
+  );
+  expect(error).toHaveBeenCalledWith(
+    `  If OpenShell still reports the sandbox present, destroy preserves the recovery record and removes no resources. Give the displayed create-attempt label to an OpenShell administrator, ask them to remove that exact sandbox through an identity-bound procedure, then run \`nemoclaw ${sandboxName} destroy --yes\` to reconcile the record.`,
+  );
+  expect(error).toHaveBeenCalledWith(
+    `  After destroy completes, rerun the original \`${onboardCommand}\` command.`,
+  );
+  expect(error.mock.calls.flat().join("\n")).not.toContain("Then rerun");
+}
+
 function makeRestoreFixture(): {
   backupPath: string;
   currentPath: string;
@@ -619,46 +683,36 @@ describe("created DCode sandbox finalization", () => {
   });
 
   it("does not publish registry metadata when live validation fails (#6311)", () => {
-    const register = vi.fn();
-    const error = vi.fn();
-    expect(() =>
-      finalizeCreatedSandbox(
-        {
-          sandboxName: "dcode",
-          restoreBackupPath: null,
-          preUpgradeBackup: false,
-          targetAgentType: "langchain-deepagents-code",
-          validateManagedDcode: true,
-          provider: "nvidia-prod",
-          model: "new-model",
-          preferredInferenceApi: null,
-        },
-        {
-          discoverFreshOpenClawImagePluginInstalls: vi.fn(),
-          restoreRecreatedSandboxState: vi.fn(),
-          getDcodeSelectionDrift: () => ({
-            changed: true,
-            providerChanged: false,
-            modelChanged: true,
-            existingProvider: "nvidia-prod",
-            existingModel: "openai:old-model",
-            unknown: false,
-          }),
-          register,
-          note: vi.fn(),
-          error,
-          exitProcess: (code): never => {
-            throw new Error(`exit ${code}`);
-          },
-        },
-      ),
-    ).toThrow("exit 1");
-    expect(register).not.toHaveBeenCalled();
+    const { error } = finalizeDcodeWithProbe(DRIFTED_DCODE_PROBE);
     expect(error).toHaveBeenCalledWith(expect.stringContaining("sandbox still exists"));
     expect(error).toHaveBeenCalledWith(expect.stringContaining("rebuild is unsafe"));
     expect(error).toHaveBeenCalledWith(expect.stringContaining("Verify its durable identity"));
     expect(error.mock.calls.flat().join("\n")).not.toContain("openshell sandbox delete");
     expect(error).toHaveBeenCalledWith(expect.stringContaining("nemoclaw onboard"));
+    expectDestroyFirstRecovery(error, "dcode", "nemoclaw onboard");
+  });
+
+  it("prints the expected and live DCode identities when live validation drifts (#10877)", () => {
+    const { error } = finalizeDcodeWithProbe(DRIFTED_DCODE_PROBE);
+    expect(error).toHaveBeenCalledWith(
+      "  Expected DCode identity: route 'inference', provider 'nvidia-prod', model 'openai:new-model', endpoint 'https://inference.local/v1'.",
+    );
+    expect(error).toHaveBeenCalledWith(
+      "  Live DCode identity: route 'inference', provider 'nvidia-prod', model 'openai:old-model', endpoint 'https://inference.local/v1'.",
+    );
+    expect(error.mock.calls.flat().join("\n")).not.toContain("unreadable");
+  });
+
+  it("reports an unreadable live DCode identity instead of drift when the probe returns nothing (#10877)", () => {
+    const { error } = finalizeDcodeWithProbe(null);
+    expect(error).toHaveBeenCalledWith(
+      "  Expected DCode identity: route 'inference', provider 'nvidia-prod', model 'openai:new-model', endpoint 'https://inference.local/v1'.",
+    );
+    expect(error).toHaveBeenCalledWith(
+      "  Live DCode identity: unreadable. NemoClaw could not read a complete Route, Provider, Model, and Endpoint identity from `dcode identity` in the sandbox, so it cannot tell whether the route drifted.",
+    );
+    expect(error.mock.calls.flat().join("\n")).not.toContain("Live DCode identity: route");
+    expectDestroyFirstRecovery(error, "dcode", "nemoclaw onboard");
   });
 
   it("rejects registration after a partial workspace restore (#6311)", () => {
@@ -997,9 +1051,7 @@ describe("created OpenClaw sandbox finalization", () => {
     );
     expect(error).toHaveBeenCalledWith(expect.stringContaining("Verify its durable identity"));
     expect(error.mock.calls.flat().join("\n")).not.toContain("openshell sandbox delete");
-    expect(error).toHaveBeenCalledWith(
-      "  Then rerun the original `nemoclaw onboard --from <Dockerfile>` command.",
-    );
+    expectDestroyFirstRecovery(error, "openclaw", "nemoclaw onboard --from <Dockerfile>");
     expect(error).toHaveBeenCalledWith("  Manual recovery: /tmp/openclaw-backup");
   });
 
@@ -1052,9 +1104,7 @@ describe("created OpenClaw sandbox finalization", () => {
     );
     expect(error).toHaveBeenCalledWith(expect.stringContaining("Verify its durable identity"));
     expect(error.mock.calls.flat().join("\n")).not.toContain("openshell sandbox delete");
-    expect(error).toHaveBeenCalledWith(
-      "  Then rerun the original `nemoclaw onboard --from <Dockerfile>` command.",
-    );
+    expectDestroyFirstRecovery(error, "openclaw", "nemoclaw onboard --from <Dockerfile>");
     expect(error).toHaveBeenCalledWith("  Manual recovery: /tmp/openclaw-backup");
   });
 });

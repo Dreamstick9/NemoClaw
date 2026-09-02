@@ -38,6 +38,18 @@ function identity(
   ].join("\n");
 }
 
+function identityRecord(
+  overrides: Partial<Record<"route" | "provider" | "model" | "endpoint", string>> = {},
+) {
+  return {
+    route: "inference",
+    provider: "nvidia-prod",
+    model: "openai:nvidia/nemotron-3-super-120b-a12b",
+    endpoint: "https://inference.local/v1",
+    ...overrides,
+  };
+}
+
 describe("live DCode selection drift", () => {
   it("limits the managed identity contract to stock DCode images (#6311)", () => {
     expect(usesManagedDcodeIdentity("langchain-deepagents-code", null)).toBe(true);
@@ -102,6 +114,14 @@ describe("live DCode selection drift", () => {
       existingProvider: "openrouter",
       existingModel: "openrouter:nvidia/nemotron-3-ultra-550b-a55b",
       unknown: false,
+      expectedIdentity: identityRecord({
+        provider: "openrouter",
+        model: "openrouter:nvidia/nemotron-3-ultra-550b-a55b",
+      }),
+      existingIdentity: identityRecord({
+        provider: "openrouter",
+        model: "openrouter:nvidia/nemotron-3-ultra-550b-a55b",
+      }),
     });
   });
 
@@ -232,6 +252,8 @@ describe("live DCode selection drift", () => {
       existingProvider: "nvidia-prod",
       existingModel: "openai:nvidia/nemotron-3-super-120b-a12b",
       unknown: false,
+      expectedIdentity: identityRecord(),
+      existingIdentity: identityRecord(),
     });
     expect(runCaptureOpenshell).toHaveBeenCalledWith(
       [
@@ -288,6 +310,8 @@ describe("live DCode selection drift", () => {
       modelChanged: true,
       existingModel: "openai:old-model",
       unknown: false,
+      expectedIdentity: identityRecord({ model: "openai:new-model" }),
+      existingIdentity: identityRecord({ model: "openai:old-model" }),
     });
   });
 
@@ -316,6 +340,8 @@ describe("live DCode selection drift", () => {
       existingProvider: null,
       existingModel: null,
       unknown: true,
+      expectedIdentity: identityRecord({ model: "openai:model-a" }),
+      existingIdentity: null,
     });
   });
 });

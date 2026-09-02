@@ -749,6 +749,18 @@ export function createOnboardCreatedSandboxCompletion(
   );
 }
 
+function describeSelectionIdentity(identity: SelectionDrift["expectedIdentity"]): string {
+  return identity
+    ? `route '${identity.route}', provider '${identity.provider}', model '${identity.model}', endpoint '${identity.endpoint}'`
+    : "unavailable";
+}
+
+function describeLiveSelectionIdentity(drift: SelectionDrift): string {
+  return drift.unknown
+    ? "unreadable. NemoClaw could not read a complete Route, Provider, Model, and Endpoint identity from `dcode identity` in the sandbox, so it cannot tell whether the route drifted"
+    : describeSelectionIdentity(drift.existingIdentity);
+}
+
 /** Restore state and validate the live managed DCode route before registry publication. */
 export function finalizeCreatedSandbox(
   options: CreatedSandboxFinalizationOptions,
@@ -760,6 +772,15 @@ export function finalizeCreatedSandbox(
     );
     deps.error("  Verify its durable identity before manual cleanup; do not act by name alone.");
   };
+  const reportRetainedSandboxRecoveryCommand = (onboardCommand: string): void => {
+    deps.error(
+      `  Run \`nemoclaw ${options.sandboxName} destroy\` to attempt identity-bound recovery; onboarding refuses resume, reuse, recreation, and same-name fresh onboarding while its retained recovery record exists.`,
+    );
+    deps.error(
+      `  If OpenShell still reports the sandbox present, destroy preserves the recovery record and removes no resources. Give the displayed create-attempt label to an OpenShell administrator, ask them to remove that exact sandbox through an identity-bound procedure, then run \`nemoclaw ${options.sandboxName} destroy --yes\` to reconcile the record.`,
+    );
+    deps.error(`  After destroy completes, rerun the original \`${onboardCommand}\` command.`);
+  };
   let freshOpenClawImagePluginInstalls: readonly OpenClawImagePluginInstall[] | undefined;
   if (options.discoverOpenClawImagePluginInstalls === true) {
     const discovery = deps.discoverFreshOpenClawImagePluginInstalls(options.sandboxName);
@@ -769,7 +790,7 @@ export function finalizeCreatedSandbox(
       );
       deps.error("  State was not restored and registry metadata was not updated.");
       reportUnregisteredSandboxRecovery();
-      deps.error("  Then rerun the original `nemoclaw onboard --from <Dockerfile>` command.");
+      reportRetainedSandboxRecoveryCommand("nemoclaw onboard --from <Dockerfile>");
       if (options.restoreBackupPath) deps.error(`  Manual recovery: ${options.restoreBackupPath}`);
       return deps.exitProcess(1);
     }
@@ -819,7 +840,7 @@ export function finalizeCreatedSandbox(
           "  The sandbox still exists, but registry metadata was not updated because a future rebuild would be unsafe.",
         );
         reportUnregisteredSandboxRecovery();
-        deps.error("  Then rerun the original `nemoclaw onboard --from <Dockerfile>` command.");
+        reportRetainedSandboxRecoveryCommand("nemoclaw onboard --from <Dockerfile>");
         deps.error(`  Manual recovery: ${options.restoreBackupPath}`);
         return deps.exitProcess(1);
       }
@@ -861,10 +882,14 @@ export function finalizeCreatedSandbox(
         `  DCode live model/provider validation failed for sandbox '${options.sandboxName}'. The sandbox still exists, but its live route is unverified and registry metadata was not updated.`,
       );
       deps.error(
+        `  Expected DCode identity: ${describeSelectionIdentity(finalSelection.expectedIdentity)}.`,
+      );
+      deps.error(`  Live DCode identity: ${describeLiveSelectionIdentity(finalSelection)}.`);
+      deps.error(
         "  A NemoClaw rebuild is unsafe here because no verified registry metadata exists.",
       );
       reportUnregisteredSandboxRecovery();
-      deps.error("  Then rerun the original `nemoclaw onboard` command.");
+      reportRetainedSandboxRecoveryCommand("nemoclaw onboard");
       if (options.restoreBackupPath) {
         deps.error(`  Manual recovery: ${options.restoreBackupPath}`);
       }

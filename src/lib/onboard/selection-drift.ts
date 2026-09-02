@@ -7,6 +7,14 @@ import path from "node:path";
 
 import type { ProviderSelectionConfig } from "../inference/config";
 
+/** Route-level identity that a live reader compares beyond provider and model. */
+export type SelectionIdentity = {
+  route: string;
+  provider: string;
+  model: string;
+  endpoint: string;
+};
+
 export type SelectionDrift = {
   changed: boolean;
   providerChanged: boolean;
@@ -14,6 +22,10 @@ export type SelectionDrift = {
   existingProvider: string | null;
   existingModel: string | null;
   unknown: boolean;
+  // Set only by readers that compare a full identity. A null existingIdentity
+  // means the live identity was unreadable, not that it matched.
+  expectedIdentity?: SelectionIdentity | null;
+  existingIdentity?: SelectionIdentity | null;
 };
 
 type RunOpenshellForSelection = (
