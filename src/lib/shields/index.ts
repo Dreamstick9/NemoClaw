@@ -45,8 +45,10 @@ const {
   resolvePermissivePolicyPath,
   inspectPolicyMutationContext,
   isPolicyObservationError,
+  PolicyObservationError,
   recheckPolicyMutationContext,
-} = require("../policy");
+}: typeof import("../policy") = require("../policy");
+type PolicyObservationError = import("../policy").PolicyObservationError;
 const {
   formatOpenShellPolicyRecoveryAction,
 }: typeof import("../gateway-start-guidance") = require("../gateway-start-guidance");
@@ -2177,17 +2179,49 @@ function isDurableContainmentFailure(error: unknown): boolean {
   );
 }
 
+function failInlineAutoRestoreWithoutPolicyAuthority(
+  sandboxName: string,
+  marker: TimerMarker & { processToken: string },
+  failure: PolicyObservationError,
+): never {
+  const retryCommand = `${CLI_NAME} ${sandboxName} shields status`;
+  const recovery = failure.policyReadError
+    ? formatOpenShellPolicyRecoveryAction(failure.policyReadError, retryCommand)
+    : `Correct the reported policy failure, then retry \`${retryCommand}\`.`;
+  const punctuation = /[.!?]$/u.test(failure.message) ? "" : ".";
+  const message = `Inline auto-restore exhausted ${String(
+    INTERACTIVE_AUTO_RESTORE_MAX_ATTEMPTS,
+  )} attempts because the OpenShell policy authority could not be observed: ${failure.message}${punctuation} Shields remain DOWN behind the expired auto-restore deadline. NemoClaw recorded no durable containment, so no lifecycle-lock cleanup is required. ${recovery}`;
+  appendAuditEntryBestEffort({
+    action: "shields_up_failed",
+    sandbox: sandboxName,
+    timestamp: new Date().toISOString(),
+    restored_by: "auto_timer",
+    policy_snapshot: marker.snapshotPath,
+    error: message,
+  });
+  throw new PolicyObservationError(message, {
+    cause: failure,
+    policyReadError: failure.policyReadError,
+  });
+}
+
 function retryInlineAutoRestore(
   sandboxName: string,
   marker: TimerMarker & { processToken: string },
 ): void {
   let notifiedError: string | null = null;
+  // Durable containment answers ownership ambiguity. An OpenShell policy
+  // authority that cannot be observed is an external outage, so the final
+  // attempt's failure class decides whether containment is recorded.
+  let policyObservationFailure: PolicyObservationError | null = null;
   for (let attempt = 0; attempt < INTERACTIVE_AUTO_RESTORE_MAX_ATTEMPTS; attempt += 1) {
     try {
       const recoveredState = recoverExpiredAutoRestoreGate(sandboxName, true);
       if (!recoveredState._isCorrupt && recoveredState.shieldsDown !== true) {
         return;
       }
+      policyObservationFailure = null;
       assertTimerMarkerGeneration(sandboxName, marker);
       const message = "Inline auto-restore did not complete; retrying under the lifecycle gate";
       if (message !== notifiedError) {
@@ -2204,6 +2238,7 @@ function retryInlineAutoRestore(
     } catch (error) {
       if (isDurableContainmentFailure(error)) throw error;
       assertTimerMarkerGeneration(sandboxName, marker);
+      policyObservationFailure = isPolicyObservationError(error) ? error : null;
       const message = error instanceof Error ? error.message : String(error);
       if (message !== notifiedError) {
         appendAuditEntryBestEffort({
@@ -2220,6 +2255,9 @@ function retryInlineAutoRestore(
     if (attempt + 1 < INTERACTIVE_AUTO_RESTORE_MAX_ATTEMPTS) {
       Atomics.wait(transitionPollBuffer, 0, 0, INTERACTIVE_AUTO_RESTORE_RETRY_MS);
     }
+  }
+  if (policyObservationFailure) {
+    failInlineAutoRestoreWithoutPolicyAuthority(sandboxName, marker, policyObservationFailure);
   }
   failInteractiveAutoRestoreClosed(
     sandboxName,
@@ -2340,6 +2378,7 @@ function withExpiredAutoRestoreDeadlineFence<T>(
         } catch (error) {
           if (isDurableContainmentFailure(error)) throw error;
           assertTakeoverAuthority();
+          if (isPolicyObservationError(error)) throw error;
           if (fs.existsSync(`${getMcpLifecycleLockPath(sandboxName, STATE_DIR)}.containment`)) {
             throw error;
           }
@@ -4443,8 +4482,9 @@ function applyShieldsPolicySnapshot(
     context.gatewayName,
   );
   if (!livePolicyRead.ok) {
-    throw new Error(
+    throw new PolicyObservationError(
       shieldsPolicyReadFailureMessage(sandboxName, context.gatewayName, livePolicyRead.error),
+      { policyReadError: livePolicyRead.error },
     );
   }
   const livePolicy = livePolicyRead.value.document;
@@ -4592,6 +4632,8 @@ function rollbackShieldsDown(
 interface LockdownActivationResult {
   ok: boolean;
   error?: string;
+  /** The restore failure that produced `error`, kept so callers can classify it. */
+  cause?: unknown;
   chattrApplied?: boolean;
   fileHashes?: { [path: string]: string };
 }
@@ -4619,6 +4661,7 @@ function activateLockdownFromSnapshot(
       error: `policy restore preparation failed: ${
         error instanceof Error ? error.message : String(error)
       }`,
+      cause: error,
     };
   }
   const restoreStatus = typeof restoreResult.status === "number" ? restoreResult.status : 1;
@@ -4710,6 +4753,10 @@ function recoverExpiredAutoRestoreInline(
     } catch (error) {
       if (isDurableContainmentFailure(error)) throw error;
       const message = error instanceof Error ? error.message : String(error);
+      console.error(`  Recovery warning: ${message}`);
+      // The expired-timer retry loop audits an unobservable policy authority
+      // once and decides the terminal outcome.
+      if (isPolicyObservationError(error)) throw error;
       appendAuditEntry({
         action: "shields_up_failed",
         sandbox: sandboxName,
@@ -4718,7 +4765,6 @@ function recoverExpiredAutoRestoreInline(
         policy_snapshot: marker.snapshotPath,
         error: `Inline auto-restore handoff failed: ${message}`,
       });
-      console.error(`  Recovery warning: ${message}`);
       return { attempted: true, restored: false };
     }
   }
@@ -4738,6 +4784,15 @@ function recoverExpiredAutoRestoreInline(
       : {},
   );
   const nowIso = new Date().toISOString();
+  if (
+    !activation.ok &&
+    recoveryProcessToken !== undefined &&
+    recoveryProcessToken === marker?.processToken &&
+    isPolicyObservationError(activation.cause)
+  ) {
+    console.error(`  Recovery warning: ${activation.cause.message}`);
+    throw activation.cause;
+  }
   if (!activation.ok) {
     const configLocked =
       activation.fileHashes !== undefined && typeof activation.chattrApplied === "boolean";

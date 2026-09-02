@@ -10,6 +10,8 @@ import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } fr
 import {
   createShieldsFlowHarness,
   type ShieldsFlowHarnessOptions,
+  writeActivePolicyTransition,
+  writeBoundPolicySnapshot,
 } from "../../../test/helpers/shields-flow-harness";
 import {
   createHermesShieldsProviderConsumerHarness,
@@ -1179,5 +1181,179 @@ describe("shields-down rollback flow", () => {
       "Config did not reach the mutable-default state; fail-closed lockdown was restored",
     );
     expect(output).not.toContain("scheduled auto-restore remains authoritative");
+  });
+});
+
+describe("expired auto-restore during an OpenShell policy outage", () => {
+  let tmpDir: string;
+  const policyOutageMessage =
+    "OpenShell sandbox policy inspection failed: failed to connect to OpenShell server. Policy-dependent operations must stop.";
+
+  function createHarness(options: ShieldsFlowHarnessOptions = {}) {
+    return createShieldsFlowHarness(requireSource, tmpDir, options);
+  }
+
+  function policyOutage(): never {
+    const policyState = requireSource(
+      "../adapters/openshell/policy-state.js",
+    ) as typeof import("../adapters/openshell/policy-state.js");
+    throw new policyState.PolicyObservationError(policyOutageMessage);
+  }
+
+  // The state a host restart leaves behind: the timer process is gone, its
+  // deadline has passed, the shields-down transition is still bound, and no
+  // transition lock remains because no NemoClaw process was mid-mutation.
+  function writeExpiredShieldsFixtureAfterHostRestart(processToken: string, reason: string) {
+    const sandboxName = "openclaw";
+    const stateDir = path.join(tmpDir, ".nemoclaw", "state");
+    const snapshotPath = path.join(stateDir, `snapshot-${processToken.slice(0, 8)}.yaml`);
+    const statePath = path.join(stateDir, `shields-${sandboxName}.json`);
+    const timerMarkerPath = path.join(stateDir, `shields-timer-${sandboxName}.json`);
+    fs.mkdirSync(stateDir, { recursive: true });
+    const snapshotPolicy = writeBoundPolicySnapshot(snapshotPath);
+    writeActivePolicyTransition(stateDir, sandboxName, processToken, snapshotPath, snapshotPolicy);
+    fs.writeFileSync(
+      statePath,
+      JSON.stringify({
+        shieldsDown: true,
+        shieldsDownAt: new Date(Date.now() - 180_000).toISOString(),
+        shieldsDownTimeout: 120,
+        shieldsDownReason: reason,
+        shieldsDownPolicy: "permissive",
+        shieldsPolicySnapshotPath: snapshotPath,
+        shieldsPolicySnapshot: snapshotPolicy,
+      }),
+    );
+    fs.writeFileSync(
+      timerMarkerPath,
+      JSON.stringify({
+        pid: 2_147_483_647,
+        sandboxName,
+        snapshotPath,
+        restoreAt: new Date(Date.now() - 60_000).toISOString(),
+        processToken,
+        timerProcessStartIdentity: "timer-from-before-the-restart",
+        agentName: "openclaw",
+        configPath: "/sandbox/.openclaw/openclaw.json",
+        configDir: "/sandbox/.openclaw",
+      }),
+    );
+    return { statePath, timerMarkerPath };
+  }
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "shields-policy-outage-"));
+    vi.stubEnv("HOME", tmpDir);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+    delete require.cache[requireSource.resolve(SHIELDS_MODULE)];
+    delete require.cache[requireSource.resolve("./timer-bound-lock.js")];
+    delete require.cache[requireSource.resolve("./transition-lock.js")];
+    delete require.cache[requireSource.resolve("./permissive-runtime.js")];
+    delete require.cache[requireSource.resolve("../actions/sandbox/mcp-bridge-policy.js")];
+    delete require.cache[requireSource.resolve("../cli/branding.js")];
+  });
+
+  it("reports an unreachable policy authority after expired auto-restore retries and restores lockdown once it answers (#10878)", () => {
+    const processToken = "3".repeat(32);
+    const lifecycleLock = requireSource("../state/mcp-lifecycle-lock.js");
+    const lockPath = lifecycleLock.getMcpLifecycleLockPath("openclaw");
+    const containmentPath = `${lockPath}.containment`;
+    const { statePath, timerMarkerPath } = writeExpiredShieldsFixtureAfterHostRestart(
+      processToken,
+      "restart recovery test",
+    );
+    const waitSpy = vi.spyOn(Atomics, "wait").mockReturnValue("timed-out");
+    const harness = createHarness({ confirmOpenClawInodeFlags: true });
+    const gatewayAnswers = harness.policyRecoveryAuthoritySpy.getMockImplementation()!;
+    harness.policyRecoveryAuthoritySpy.mockImplementation(policyOutage);
+
+    expect(() => harness.shieldsStatus("openclaw")).toThrow(
+      /exhausted 7 attempts because the OpenShell policy authority could not be observed/u,
+    );
+
+    expect(fs.existsSync(containmentPath)).toBe(false);
+    expect(fs.existsSync(lockPath)).toBe(false);
+    expect(fs.existsSync(`${lockPath}.deadline`)).toBe(false);
+    expect(fs.existsSync(timerMarkerPath)).toBe(true);
+    expect(JSON.parse(fs.readFileSync(statePath, "utf-8"))).toMatchObject({ shieldsDown: true });
+    expect(waitSpy.mock.calls.filter((call) => call[3] === 5_000)).toHaveLength(6);
+    expect(harness.runSpy).not.toHaveBeenCalledWith(
+      ["openshell", "policy", "set", "-g", "nemoclaw"],
+      expect.anything(),
+    );
+    const failures = harness.auditSpy.mock.calls
+      .map(([entry]) => entry as { action: string; error?: string })
+      .filter((entry) => entry.action === "shields_up_failed")
+      .map((entry) => entry.error);
+    expect(failures).toEqual([
+      expect.stringContaining("failed to connect to OpenShell server"),
+      expect.stringContaining("no lifecycle-lock cleanup is required"),
+    ]);
+    expect(harness.errorSpy.mock.calls.flat().join("\n")).toContain(
+      "Recovery warning: OpenShell sandbox policy inspection failed",
+    );
+
+    harness.policyRecoveryAuthoritySpy.mockImplementation(gatewayAnswers);
+    harness.auditSpy.mockClear();
+
+    harness.shieldsStatus("openclaw");
+
+    expect(JSON.parse(fs.readFileSync(statePath, "utf-8"))).toMatchObject({
+      shieldsDown: false,
+      shieldsDownAt: null,
+    });
+    expect(fs.existsSync(timerMarkerPath)).toBe(false);
+    expect(fs.existsSync(containmentPath)).toBe(false);
+    expect(harness.runSpy).toHaveBeenCalledWith(
+      ["openshell", "policy", "set", "-g", "nemoclaw"],
+      expect.objectContaining({ ignoreError: true }),
+    );
+    expect(harness.auditSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "shields_auto_restore",
+        sandbox: "openclaw",
+        restored_by: "auto_timer",
+      }),
+    );
+    expect(harness.logSpy).toHaveBeenCalledWith("  Shields: UP (lockdown active)");
+  });
+
+  it("still records containment when the final expired auto-restore attempt fails after the policy authority answers (#10878)", () => {
+    const processToken = "2".repeat(32);
+    const lifecycleLock = requireSource("../state/mcp-lifecycle-lock.js");
+    const containmentPath = `${lifecycleLock.getMcpLifecycleLockPath("openclaw")}.containment`;
+    const { statePath, timerMarkerPath } = writeExpiredShieldsFixtureAfterHostRestart(
+      processToken,
+      "restart recovery with a failing config lock",
+    );
+    vi.spyOn(Atomics, "wait").mockReturnValue("timed-out");
+    const harness = createHarness({
+      confirmOpenClawInodeFlags: true,
+      failOpenClawGuardActions: ["lock"],
+    });
+    // Six outages, then the harness default answers for the final attempt.
+    harness.policyRecoveryAuthoritySpy
+      .mockImplementationOnce(policyOutage)
+      .mockImplementationOnce(policyOutage)
+      .mockImplementationOnce(policyOutage)
+      .mockImplementationOnce(policyOutage)
+      .mockImplementationOnce(policyOutage)
+      .mockImplementationOnce(policyOutage);
+
+    expect(() => harness.shieldsStatus("openclaw")).toThrow(
+      "Inline auto-restore exhausted 7 attempts: Inline auto-restore did not complete; retrying under the lifecycle gate. Durable sandbox mutation containment requires operator resolution",
+    );
+
+    // Six failed reads, then the final attempt reads twice: the handoff
+    // restore and the snapshot activation that precedes the failing lock.
+    expect(harness.policyRecoveryAuthoritySpy).toHaveBeenCalledTimes(8);
+    expect(fs.existsSync(containmentPath)).toBe(true);
+    expect(fs.existsSync(timerMarkerPath)).toBe(true);
+    expect(JSON.parse(fs.readFileSync(statePath, "utf-8"))).toMatchObject({ shieldsDown: true });
   });
 });

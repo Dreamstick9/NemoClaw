@@ -20,11 +20,18 @@ vi.mock("../runner", () => ({
   ROOT: "/mock/root",
 }));
 
-vi.mock("../policy", () => ({
-  parseCurrentPolicy: vi.fn((raw) => raw || ""),
-  PERMISSIVE_POLICY_PATH: "/mock/permissive.yaml",
-  resolvePermissivePolicyPath: vi.fn(() => "/mock/permissive.yaml"),
-}));
+vi.mock("../policy", async () => {
+  const policyState = await vi.importActual<typeof import("../adapters/openshell/policy-state")>(
+    "../adapters/openshell/policy-state",
+  );
+  return {
+    isPolicyObservationError: policyState.isPolicyObservationError,
+    PolicyObservationError: policyState.PolicyObservationError,
+    parseCurrentPolicy: vi.fn((raw) => raw || ""),
+    PERMISSIVE_POLICY_PATH: "/mock/permissive.yaml",
+    resolvePermissivePolicyPath: vi.fn(() => "/mock/permissive.yaml"),
+  };
+});
 
 vi.mock("../sandbox/agent-config", () => ({
   resolveAgentStateLockContract: vi.fn(() => ({

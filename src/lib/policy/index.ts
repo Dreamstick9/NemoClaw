@@ -22,7 +22,10 @@ import {
   type OpenShellSandboxResult,
 } from "../adapters/openshell/sandbox-policy-cli";
 import { PolicyObservationError } from "../adapters/openshell/policy-state";
-export { isPolicyObservationError } from "../adapters/openshell/policy-state";
+export {
+  isPolicyObservationError,
+  PolicyObservationError,
+} from "../adapters/openshell/policy-state";
 import { loadAgent, requireAgentPolicyAdditionsPath } from "../agent/defs";
 import { CLI_NAME } from "../cli/branding";
 import {
