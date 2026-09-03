@@ -229,7 +229,8 @@ systemctl --user status <serviceName>
 ```
 
 Bring the supervised gateway up, leave exactly one verified process holding the configured port, and rerun `$$nemoclaw onboard`.
-To hand the lifecycle back to NemoClaw, remove the platform gateway service and declare `nemoclaw-managed`, or remove the declaration.
+To hand the lifecycle back to NemoClaw, first stop and remove or disable the external supervisor and its gateway so no process remains on the configured port.
+Then declare `nemoclaw-managed` or remove the declaration, and rerun `$$nemoclaw onboard`.
 
 ### Inspect a NemoClaw-managed gateway
 
