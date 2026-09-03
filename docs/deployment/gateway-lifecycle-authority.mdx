@@ -177,7 +177,8 @@ $$nemoclaw status
 $$nemoclaw status --json
 ```
 
-In `nemoclaw-managed` mode, the owner is the source `packaged-service` or `standalone`, and `gatewayAuthority.supervisor` is `null`.
+In `nemoclaw-managed` mode, `gatewayAuthority.supervisor` is `null`.
+The owner source is `declared` when a declaration selected that mode; without a declaration it is the resolved lifecycle source, `packaged-service` or `standalone`.
 In `externally-supervised` mode, the owner is the declared supervisor `kind`, `serviceName`, and `execPath`.
 `$$nemoclaw debug` also records `gatewayAuthority` in `onboard-session-summary.txt`.
 The status and debug views omit the external state directory and never include credential values.
@@ -234,13 +235,16 @@ To hand the lifecycle back to NemoClaw, remove the platform gateway service and 
 
 In `nemoclaw-managed` mode, no declaration names a unit.
 NemoClaw uses a managed service only for the default gateway port `8080`.
-The service depends on the install.
+Read the `Owner` value before looking for a service.
+An owner of `standalone` has no service unit.
+For `packaged-service` or a declared managed mode, use the exact service inspection or recovery command that NemoClaw reports; the owner record does not include the resolved user-service name.
+Do not infer the selected Linux unit from install type alone: a tarball installation can adopt a verified upstream package unit, while a host without a usable user manager keeps the standalone gateway.
 
-| Install | Service | Status command |
+| Platform | Possible selected service | Inspection |
 |---|---|---|
-| Linux package install | The `openshell-gateway.service` user unit installed by the OpenShell package | `systemctl --user status openshell-gateway` |
-| Linux tarball install | The `nemoclaw-openshell-gateway.service` user unit staged by the NemoClaw installer | `systemctl --user status nemoclaw-openshell-gateway` |
-| macOS with the `nvidia/openshell/openshell` Homebrew formula | The `openshell` formula service | `brew services info openshell` |
+| Linux | The verified upstream `openshell-gateway.service` user unit | `systemctl --user status openshell-gateway` |
+| Linux | The marked `nemoclaw-openshell-gateway.service` user unit staged by the NemoClaw installer | `systemctl --user status nemoclaw-openshell-gateway` |
+| macOS | The `openshell` service from the `nvidia/openshell/openshell` Homebrew formula | Continue with [Reconnect after a host reboot](../reference/troubleshooting#reconnect-after-a-host-reboot) so NemoClaw performs trust-scoped inspection and recovery. Do not run `brew services` directly. |
 
 Both Linux units belong to the systemd user manager.
 A `systemctl status` command without `--user` reports that the unit cannot be found.
