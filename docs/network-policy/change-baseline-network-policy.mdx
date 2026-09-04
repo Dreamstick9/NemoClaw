@@ -49,7 +49,7 @@ Use the same value as the policy key.
 `endpoints`
 : A list of endpoints that the sandbox can reach.
 Each endpoint sets `host` and exactly one of `port` or `ports`.
-Do not add `allowed_ips` to a baseline entry. That field widens the private ranges that OpenShell checks for server-side request forgery. To reach a private host, use the trusted private host flow in [Create Custom Policy Presets](create-custom-policy-presets) instead.
+An endpoint can also pin `allowed_ips`, as the shipped baseline does for the local inference host. That field widens the private ranges that OpenShell checks for server-side request forgery, so review each resolved address before you add one.
 For an HTTP API, each endpoint also sets `protocol: rest` and either its own `rules` list or `access`. The examples below use `enforcement: enforce` with `rules`, which is the least-privilege form.
 
 `binaries`
