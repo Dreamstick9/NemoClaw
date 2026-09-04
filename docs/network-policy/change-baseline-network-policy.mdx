@@ -48,7 +48,8 @@ Use the same value as the policy key.
 
 `endpoints`
 : A list of endpoints that the sandbox can reach.
-Each endpoint sets `host` and exactly one of `port` or `ports`.
+Each endpoint sets exactly one of `port` or `ports`, and at least one destination: `host`, `allowed_ips`, or both.
+`allowed_ips` changes the server-side request forgery boundary that OpenShell enforces, so review each address before you add one.
 For an HTTP API, each endpoint also sets `protocol: rest` and either its own `rules` list or `access`. The examples below use `enforcement: enforce` with `rules`, which is the least-privilege form.
 
 `binaries`
