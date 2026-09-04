@@ -48,7 +48,7 @@ Use the same value as the policy key.
 
 `endpoints`
 : A list of endpoints that the sandbox can reach.
-Each endpoint sets `host` and `port`.
+Each endpoint sets `host` or `allowed_ips`, and exactly one of `port` or `ports`.
 For an HTTP API, each endpoint also sets `protocol: rest`, `enforcement: enforce`, and its own `rules` list.
 
 `binaries`
