@@ -71,7 +71,11 @@ impl FabricCatalog {
                     .adapters
                     .iter()
                     .any(|adapter| adapter.adapter_id() == adapter_id)
-                    || files.iter().any(|file| !file.is_absolute())
+                    || files.iter().any(|file| {
+                        !file.to_str().is_some_and(|path| {
+                            path.starts_with('/') && !path.split('/').any(|part| part == "..")
+                        })
+                    })
             })
         {
             return Err(<serde_json::Error as serde::de::Error>::custom(
@@ -122,6 +126,11 @@ mod tests {
         catalog
             .runtime_files
             .insert(adapter_id, vec!["opt/runtime".into()]);
+        assert!(FabricCatalog::from_json(&serde_json::to_string(&catalog).unwrap()).is_err());
+        catalog.runtime_files.insert(
+            catalog.adapters[0].adapter_id().to_owned(),
+            vec!["/opt/runtime/../../etc".into()],
+        );
         assert!(FabricCatalog::from_json(&serde_json::to_string(&catalog).unwrap()).is_err());
         catalog.runtime_files.clear();
         catalog

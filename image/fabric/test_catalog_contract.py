@@ -41,6 +41,16 @@ class CatalogContract(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "absolute paths"):
             self.snapshot_with_runtime_files({adapter_id: ["opt/runtime"]})
 
+    def test_parent_traversal_runtime_files_fail_the_snapshot(self):
+        adapter_id = Fabric().discover()[0].to_mapping()["descriptor"]["adapter_id"]
+        with self.assertRaisesRegex(ValueError, "absolute paths"):
+            self.snapshot_with_runtime_files({adapter_id: ["/opt/runtime/../../etc"]})
+
+    def test_runtime_files_must_be_a_list_of_paths(self):
+        adapter_id = Fabric().discover()[0].to_mapping()["descriptor"]["adapter_id"]
+        with self.assertRaisesRegex(ValueError, "absolute paths"):
+            self.snapshot_with_runtime_files({adapter_id: {"/opt/runtime": True}})
+
     def test_snapshot_preserves_owner_records(self):
         records = Fabric().discover()
         catalog = snapshot("a" * 40, "b" * 64)

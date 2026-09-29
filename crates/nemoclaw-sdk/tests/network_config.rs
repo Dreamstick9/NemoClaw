@@ -125,7 +125,7 @@ fn explicit_policy_supports_tcp_rest_websocket_rpc_mcp_and_deny_all() {
         let document = parse(&value).unwrap_or_else(|e| panic!("{endpoint}: {e}"));
         let proto = document.spec.sandboxes[0].network.policy_proto().unwrap();
         assert!(
-            nemoclaw_sdk::openshell::policy_json(&proto).is_ok(),
+            nemoclaw_sdk::config::policy_json(&proto).is_ok(),
             "observation must retain {endpoint}"
         );
     }
@@ -133,7 +133,7 @@ fn explicit_policy_supports_tcp_rest_websocket_rpc_mcp_and_deny_all() {
     value["spec"]["sandboxes"][0]["network"]["policy"]["explicit"]["network_policies"] = json!({});
     let document = parse(&value).unwrap();
     assert!(
-        nemoclaw_sdk::openshell::policy_json(
+        nemoclaw_sdk::config::policy_json(
             &document.spec.sandboxes[0].network.policy_proto().unwrap()
         )
         .is_ok()
@@ -327,6 +327,16 @@ fn default_network_is_a_valid_isolated_policy() {
     let default = Network::default();
     default.validate().unwrap();
     assert_eq!(default.policy, NetworkPolicy::Isolated);
+    let mut policy = default.policy_proto().unwrap();
+    policy.filesystem.as_mut().unwrap().read_only.reverse();
+    assert_eq!(nemoclaw_sdk::config::policy_json(&policy).unwrap(), "");
+    policy
+        .filesystem
+        .as_mut()
+        .unwrap()
+        .read_write
+        .push("/".into());
+    assert!(!matches!(nemoclaw_sdk::config::policy_json(&policy), Ok(value) if value.is_empty()));
     for value in [json!({}), json!({"tier": ""}), json!({"tier": "isolated"})] {
         assert_eq!(serde_json::from_value::<Network>(value).unwrap(), default);
     }

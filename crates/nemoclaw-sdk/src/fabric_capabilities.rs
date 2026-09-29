@@ -159,7 +159,23 @@ pub fn assess_fabric(catalog: &FabricCatalog, request: &FabricRequirements) -> C
             .iter()
             .chain(image_files)
         {
-            let allowed = file.is_absolute() && grants.iter().any(|grant| file.starts_with(grant));
+            // These are Linux sandbox paths, including on Windows clients.
+            let allowed = file.to_str().is_some_and(|path| {
+                path.starts_with('/')
+                    && !path.split('/').any(|part| part == "..")
+                    && grants.iter().any(|grant| {
+                        if !grant.starts_with('/') || grant.split('/').any(|part| part == "..") {
+                            return false;
+                        }
+                        let mut required = path
+                            .split('/')
+                            .filter(|part| !part.is_empty() && *part != ".");
+                        grant
+                            .split('/')
+                            .filter(|part| !part.is_empty() && *part != ".")
+                            .all(|part| required.next() == Some(part))
+                    })
+            });
             let path = file.display();
             checks.push(CapabilityCheck {
                 requirement: "deployment_filesystem_grant".into(),

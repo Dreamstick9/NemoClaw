@@ -74,7 +74,7 @@ Do not choose `tls: skip` for an endpoint that relies on those controls, includi
 Use explicit `enforcement: enforce` when the policy must reject disallowed inspected requests.
 The checked-in example uses that enforcement setting with automatic TLS handling.
 
-The [pinned parser](https://github.com/NVIDIA/OpenShell/blob/d1155aa70042d3e2ee49dbfa15346b108b7c1d92/crates/openshell-supervisor-network/src/l7/mod.rs) and [proxy](https://github.com/NVIDIA/OpenShell/blob/d1155aa70042d3e2ee49dbfa15346b108b7c1d92/crates/openshell-supervisor-network/src/proxy.rs) define these behaviors.
+The [pinned parser](https://github.com/NVIDIA/OpenShell/blob/1fe79f53991debf32776853a60f0cbd4e127dcfb/crates/openshell-supervisor-network/src/l7/mod.rs) and [proxy](https://github.com/NVIDIA/OpenShell/blob/1fe79f53991debf32776853a60f0cbd4e127dcfb/crates/openshell-supervisor-network/src/proxy.rs) define these behaviors.
 The [SDK policy validator](../crates/nemoclaw-sdk/src/config/network.rs) accepts only supported field combinations; a field's presence in the schema does not bypass protocol validation.
 Live enforcement and application trust on your host remain qualification requirements.
 Follow [policy change constraints](#verify-and-change-the-configuration) before changing a deployed policy.
@@ -103,7 +103,10 @@ flowchart LR
 Use the plan/apply/export commands in [deployment usage](usage.md), then reapply the exported document.
 A successful unchanged reapply preserves the sandbox identity and creates no replacement.
 Export compares the observed policy and launch settings with retained intent and checks that a ready sandbox has loaded the matching policy revision.
-Missing policy observations or drift stop export; they do not produce a partial configuration.
+OpenShell can persist supervisor-added filesystem grants in the active policy revision without recording their source.
+NemoClaw accepts only the bounded baseline additions checked by this version; other differences or incomplete observations stop export and preserve state.
+GPU-specific additions are not qualified by this check.
+Missing policy observations or drift do not produce a partial configuration.
 
 Policy changes require sandbox replacement, which ordinary apply rejects.
 Back up sandbox files and conversation history before using the explicit [destroy and recreate procedure](usage.md#destroy).

@@ -26,7 +26,14 @@ def read_runtime_files(path, adapters):
     for adapter_id, files in declared.items():
         if adapter_id not in cataloged:
             raise ValueError(f"{path} names {adapter_id}, which this catalog does not list")
-        if not files or not all(isinstance(file, str) and file.startswith("/") for file in files):
+        if (
+            not isinstance(files, list)
+            or not files
+            or not all(
+                isinstance(file, str) and file.startswith("/") and ".." not in file.split("/")
+                for file in files
+            )
+        ):
             raise ValueError(f"{path} must list absolute paths for {adapter_id}")
     return declared
 
