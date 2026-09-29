@@ -145,16 +145,35 @@ pub fn assess_fabric(catalog: &FabricCatalog, request: &FabricRequirements) -> C
     if let (Ok(plan), Some(grants)) = (&result, &request.filesystem_read)
         && let Some(descriptor) = &plan.adapter_descriptor
     {
-        for file in &descriptor.descriptor.requirements.files {
+        // Fabric declares the adapter's own files; the image build declares
+        // where its layout installs the harness. The policy must allow both.
+        let image_files = catalog
+            .runtime_files
+            .get(&descriptor.descriptor.adapter_id)
+            .into_iter()
+            .flatten();
+        for file in descriptor
+            .descriptor
+            .requirements
+            .files
+            .iter()
+            .chain(image_files)
+        {
             let allowed = file.is_absolute() && grants.iter().any(|grant| file.starts_with(grant));
-            checks.push(check(
-                "deployment_filesystem_grant",
-                if allowed {
+            let path = file.display();
+            checks.push(CapabilityCheck {
+                requirement: "deployment_filesystem_grant".into(),
+                status: if allowed {
                     Support::Supported
                 } else {
                     Support::Unsupported
                 },
-            ));
+                reason: if allowed {
+                    format!("explicit filesystem policy grants read access to {path}")
+                } else {
+                    format!("explicit filesystem policy must grant read access to {path}")
+                },
+            });
         }
     }
     CompatibilityReport {
